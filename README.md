@@ -1,4 +1,4 @@
-# ML_KerasNN
+# Keras Neural Network on MNIST Fashion Data
 
 210410: loss: 0.4219 - accuracy: 0.8789  
 &ensp;&ensp; Uses RandomizedSearchCV to randomly search for the best parameters for the model
