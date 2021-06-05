@@ -10,12 +10,13 @@
 
 210416: loss: 0.3150 - accuracy: 0.8867
 
-    Applies kernel initialization, 
-            non-saturating activation function, 
-            batch normalization, 
-            Monte Carlo dropout for regularization, 
-            improving optimizer, 
-            exponential scheduling
+    Applies 
+      kernel initialization, 
+      non-saturating activation function, 
+      batch normalization, 
+      Monte Carlo dropout for regularization, 
+      improving optimizer, 
+      exponential scheduling
             
 210422: loss: 0.2855 - accuracy: 0.8973
 
