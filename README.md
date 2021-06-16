@@ -26,5 +26,7 @@
 210611: loss: 0.3919 - accuracy: 0.8827 (80% samples set untagged + autoencoder)<br/>
 &ensp;&ensp; Applies the residual neural network with a residualBlock() function
 &ensp;&ensp; Not using the full power, only
+
             for filterN in [64] + [128] + [256] + [512]:
+
 However, it already requires GPU from colab with only ~300 samples.
