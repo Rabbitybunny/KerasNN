@@ -25,13 +25,16 @@ from skopt.space import Integer, Real, Categorical
 
 MODELNAME = "mnistFashion210611.model";
 EXEPATH   = os.path.dirname(os.path.abspath(__file__)); 
+OPTITER = 0;
+OPTACCU = 0;
+OPTASTD = 0;
 def main():
     fashionData = tf.keras.datasets.fashion_mnist;
     [[inputXFull, inputYFull], [testX, testY]] = fashionData.load_data();
     nameY = ["T-shirt", "Trouser", "Pullover", "Dress", "Coat",\
              "Sandal", "Shirt", "Sneaker", "Bag", "Boot"];
     #dropping some labels to simulate unlabeld conditions
-    dropRate = 0.0;
+    dropRate = 0.8;
     np.random.seed(1);
     inputY = [];
     for y in inputYFull:
@@ -109,11 +112,12 @@ def main():
     #dropping out untagged events
     inputXNorm, inputY = dropNaNY(inputXNorm, inputY);
 #####modeling#################################################################################
+    '''
     #############Adjustables#############
     validationRatio     = 0.1;
     learnEpochN         = 6; 
     dropoutMonteCarloN  = 10;
-    optimizationCallN   = 30; #note: need >= 10
+    optimizationCallN   = 30; #note: need >= 11
     par0 = [128, pow(10, -3), "elu", "he_normal"];
     #####################################  
     denseNeuronN = Integer(low=10, high=500, name="denseNeuronN");
@@ -130,6 +134,9 @@ def main():
     eval0 = None;
     optParDict = {};
     #restore gp_minimize##################Remember to delete the .pkl file when changing model
+    global OPTITER;
+    global OPTACCU;
+    global OPTASTD;
     try:
         restoredOpt = load_gp_minimize(checkpointPath);
         par0, eval0 = restoredOpt.x_iters, restoredOpt.func_vals;
@@ -165,6 +172,7 @@ def main():
                             validationRatio, learnEpochN, dropoutMonteCarloN,\
                             pretrainedLayers=pretrainedLayers);
     optAccuracy = fitFunc(parOpt);
+    '''
 ##############################################################################################
     #loading
     model = tf.keras.models.load_model(MODELNAME);
@@ -174,6 +182,9 @@ def main():
         optParDict = pickle.load(handle);
     #evaluating
     model.evaluate(x=testXNorm, y=testY);
+    
+    print("Saving the following figures:");   
+    ''' 
     histDF.plot(figsize=(8, 5));
     plt.title("Learning Performance History");
     plt.grid("True");
@@ -181,7 +192,8 @@ def main():
     filenameFig = EXEPATH + "/fashionFig/-fashionHistory.png";
     plt.savefig(filenameFig);
     plt.close();
-    print("Saving the following figures:\n    ", filenameFig);
+    print(filenameFig);
+    ''' 
     #predicting
     predValY = model.predict(testXNorm);
     predY = np.argmax(predValY, axis=-1);
@@ -350,9 +362,6 @@ def buildModel(denseNeuronN, learningRate, actFunc, initFunc,\
     return model;
 
 #fit function#################################################################################
-OPTITER = 0;
-OPTACCU = 0;
-OPTASTD = 0;
 def learningRateFunc(epoch, initLR, minLR, decayC):
     return initLR*pow(0.1, 1.0*epoch/decayC) + minLR;
 def schedulerLambda(initLR, minLR, decayC):

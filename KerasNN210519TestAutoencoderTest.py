@@ -313,7 +313,7 @@ if __name__ == "__main__":
     validationRatio     = 0.1;
     learnEpochN         = 6;
     dropoutMonteCarloN  = 10;
-    optimizationCallN   = 30; #note: need >= 10
+    optimizationCallN   = 30; #note: need >= 11
     par0 = [3, 256, 3, 128, pow(10, -3), "elu", "he_normal"];
     #####################################  
     convLayerN   = Integer(low=1,  high=5, name="convLayerNum");

@@ -113,7 +113,7 @@ def main():
     validationRatio     = 0.1;
     learnEpochN         = 6;
     dropoutMonteCarloN  = 10;
-    optimizationCallN   = 30; #note: need >= 10
+    optimizationCallN   = 30; #note: need >= 11
     par0 = [128, pow(10, -3), "elu", "he_normal"];
     #####################################  
     denseNeuronN = Integer(low=10, high=500, name="denseNeuronN");
