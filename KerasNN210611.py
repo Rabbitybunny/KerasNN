@@ -352,7 +352,7 @@ def buildModel(denseNeuronN, learningRate, actFunc, initFunc,\
     Z = tf.keras.layers.GlobalAvgPool2D()(Z);
     Z = tf.keras.layers.Flatten()(Z);
     Z = tf.keras.layers.Dropout(rate=dropoutRate, seed=dropoutMCSeed)(Z);
-    Z = tf.keras.layers.Dense(64, activation=actFunc, kernel_initializer=initFunc)(Z);
+    Z = tf.keras.layers.Dense(denseNeuronN,activation=actFunc,kernel_initializer=initFunc)(Z);
     Z = tf.keras.layers.Dense(targetN, activation="softmax")(Z);
     model = tf.keras.models.Model(inputs=inputZ, outputs=Z);
     optimizer = tf.keras.optimizers.SGD(lr=learningRate,momentum=momentumRatio,nesterov=True);
