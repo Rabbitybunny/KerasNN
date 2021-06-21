@@ -411,8 +411,7 @@ def fitFuncGen(convLayerN, convFilterN, denseLayerN, denseNeuronN,\
     return -accuracy;
 def fitFuncLambda(targetN, inputShape, trainX, trainY, valiR, epochN, dropMCN,\
                   pretrainedLayers=[]):
-    return lambda x : fitFuncGen(x[0], x[1], x[2], x[3], x[4], x[5], x[6],\
-                                 targetN, inputShape, trainX, trainY,\
+    return lambda x : fitFuncGen(*x, targetN, inputShape, trainX, trainY,\
                                  valiR, epochN, dropMCN,\
                                  pretrainedLayers=[]);
 
