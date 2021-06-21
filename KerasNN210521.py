@@ -116,8 +116,8 @@ def main():
     #############Adjustables#############
     validationRatio     = 0.1;
     learnEpochN         = 6;
-    dropoutMonteCarloN  = 1;#10;
-    optimizationCallN   = 11;#30; #note: need >= 11
+    dropoutMonteCarloN  = 10;
+    optimizationCallN   = 30; #note: need >= 11
     par0 = [3, 256, 3, 128, pow(10, -3), "elu", "he_normal"];
     #####################################  
     convLayerN   = Integer(low=1,  high=5, name="convLayerNum");
@@ -168,7 +168,7 @@ def main():
         optParDict = pickle.load(handle);
     validationRatio     = 0.1; 
     learnEpochN         = 20;
-    dropoutMonteCarloN  = 1;#30;
+    dropoutMonteCarloN  = 30;
     parOpt = [optParDict["convLayerN"], optParDict["convFilterN"],\
               optParDict["denseLayerN"], optParDict["denseNeutronN"],\
               optParDict["learningRate"], optParDict["activationFunc"],\
