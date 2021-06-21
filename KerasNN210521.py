@@ -23,9 +23,196 @@ from skopt import load as load_gp_minimize
 from skopt.space import Integer, Real, Categorical
 
 
-MODELNAME="mnistFashion210521.model"
-#MODELNAME="mnistFashion210521.model/-NoPretrain.model"
+MODELNAME = "mnistFashion210521.model"
+#MODELNAME = "mnistFashion210521.model/-NoPretrain.model"
+EXEPATH   = os.path.dirname(os.path.abspath(__file__));
+OPTITER = 0;
+OPTACCU = 0;
+OPTASTD = 0;
+def main():
+    fashionData = tf.keras.datasets.fashion_mnist;
+    [[inputXFull, inputYFull], [testX, testY]] = fashionData.load_data();
+    nameY = ["T-shirt", "Trouser", "Pullover", "Dress", "Coat",\
+             "Sandal", "Shirt", "Sneaker", "Bag", "Boot"];
+    printFigN = 20;
+    #dropping some labels to simulate unlabeld conditions
+    dropRate = 0.8;
+    np.random.seed(1);
+    inputY = [];
+    for y in inputYFull:
+        if np.random.uniform() < dropRate:
+            inputY.append(float("NaN"));
+        else:
+            inputY.append(y);
+    #####################################################
+    inputXNorm = tf.keras.utils.normalize(inputXFull, axis=1);
+    testXNorm  = tf.keras.utils.normalize(testX, axis=1);
+    targetN = len(nameY);
+    inputShape = [inputXNorm.shape[1], inputXNorm.shape[2], 1];   #note: needed for conv2D
+    inputXNorm = inputXNorm.reshape(inputXNorm.shape[0], *inputShape);
+    testXNorm  = testXNorm .reshape(testXNorm .shape[0], *inputShape);
+#####autoencoder##############################################################################
+    pretrainedLayers = []
+    #'''
+    encodedXuntrained = None;
+    trainX, validX, trainY, validY = train_test_split(inputXNorm, inputY, test_size=0.1,\
+                                                      shuffle=False);
+    #############Adjustables#############
+    autoEpochN = 30; 
+    #####################################
+    encoder = buildEncoderConv(inputShape, regularization="dropout");
+    encoderOutputShape = list(encoder.layers[-1].output_shape);
+    encoderOutputShape = [dim for dim in encoderOutputShape if dim is not None];
+    decoder = buildDecoderConv(inputShape=encoderOutputShape);
 
+    autoEncoder = buildAutoEncoder(encoder, decoder);
+    encodedXuntrained = encoder.predict(validX);
+    tensorboardAutoDir = EXEPATH + "/" + MODELNAME + "/tensorboardAutoDir/";
+    tensorboardAutoDir += str(int(time.time())) + "Conv"; 
+    tensorboardAuto = tf.keras.callbacks.TensorBoard(tensorboardAutoDir);
+    history = autoEncoder.fit(trainX, trainX, validation_data=(validX, validX),\
+                              epochs=autoEpochN, callbacks=[tensorboardAuto]);
+    encoder    .save(MODELNAME+"/zEncoder.model");
+    decoder    .save(MODELNAME+"/zDecoder.model");
+    autoEncoder.save(MODELNAME+"/zAutoEncoder.model");
+    os.rename(tensorboardAutoDir, \
+              tensorboardAutoDir.replace("tensorboardAutoDir/", "tensorboardAutoDir/Fin"));
+    #compressed figures   
+    encoder     = tf.keras.models.load_model(MODELNAME+"/zEncoder.model", compile=False);
+    decoder     = tf.keras.models.load_model(MODELNAME+"/zDecoder.model", compile=False);
+    autoEncoder = tf.keras.models.load_model(MODELNAME+"/zAutoEncoder.model", compile=False);
+    if printFigN > 0:
+        print("Saving the following figures:");
+        encodedX = encoder.predict(validX);
+        cmprsX   = autoEncoder.predict(validX);
+        validX = validX.reshape(*validX.shape[:-1]);
+        cmprsX = cmprsX.reshape(*cmprsX.shape[:-1]);
+        printTSNE(encodedXuntrained, validY, nameY, "fashionConv"+"TSNEuntrained");
+        printTSNE(encodedX,          validY, nameY, "fashionConv"+"TSNE");
+        for idx, valX in enumerate(validX[:printFigN]):
+            fig = plt.figure(figsize=(12, 6));
+            gs = gridspec.GridSpec(1, 2);
+            ax = [];
+            for i in range (gs.nrows*gs.ncols):
+                ax.append(fig.add_subplot(gs[i]));
+            ax[0].imshow(valX, cmap=plt.cm.binary);
+            ax[0].set_title("Original Normalized", fontsize=24);
+            ax[1].imshow(cmprsX[idx], cmap=plt.cm.binary);
+            ax[1].set_title("Autoencoder Compressed", fontsize=24); 
+            filenameFig = EXEPATH + "/fashionFig/cmprsFashionConv"+str(idx)+".png";
+            plt.savefig(filenameFig, dpi=50);
+            plt.close();
+            print("   ", filenameFig);
+    #encoder for autoencoder pretraining
+    encoder = tf.keras.models.load_model(MODELNAME+"/zEncoder.model", compile=False);
+    for i, layer in enumerate(encoder.layers):
+        if isinstance(layer, tf.keras.layers.Conv2D):
+            #layer.trainable = False;
+            pretrainedLayers.append(layer);
+    #'''
+    #dropping out untagged events
+    inputXNorm, inputY = dropNaNY(inputXNorm, inputY);
+#####modeling#################################################################################
+    #############Adjustables#############
+    validationRatio     = 0.1;
+    learnEpochN         = 6;
+    dropoutMonteCarloN  = 1;#10;
+    optimizationCallN   = 11;#30; #note: need >= 11
+    par0 = [3, 256, 3, 128, pow(10, -3), "elu", "he_normal"];
+    #####################################  
+    convLayerN   = Integer(low=1,  high=5, name="convLayerNum");
+    convFilterN  = Categorical(categories=[32, 64, 128, 256, 512], name="convFilterNum");
+    denseLayerN  = Integer(low=1,  high=5, name="denseLayerNum");
+    denseNeuronN = Integer(low=10, high=500, name="denseNeuronN");
+    learningRate = Real(low=pow(10, -6), high=pow(10, -1),\
+                        prior="log-uniform", name="learningRate");
+    actFunc  = Categorical(categories=["elu", "selu"], name="activationFunc");
+    initFunc = Categorical(categories=["he_normal", "he_uniform"], name="initializationFunc");
+    dims = [convLayerN,convFilterN,denseLayerN,denseNeuronN,learningRate,actFunc,initFunc];
+    fitFunc = fitFuncLambda(targetN, inputShape, inputXNorm, inputY, \
+                            validationRatio, learnEpochN, dropoutMonteCarloN,\
+                            pretrainedLayers=pretrainedLayers);
+    checkpointPath = EXEPATH + "/" + MODELNAME + "/checkpoint.pkl";
+    checkpointSaver = CheckpointSaver(checkpointPath, compress=9, store_objective=False);
+    eval0 = None;
+    optParDict = {};
+    #restore gp_minimize##################Remember to delete the .pkl file when changing model
+    global OPTITER;
+    global OPTACCU;
+    global OPTASTD;
+    try:
+        restoredOpt = load_gp_minimize(checkpointPath);
+        par0, eval0 = restoredOpt.x_iters, restoredOpt.func_vals;
+        print("Reading the checkpoint file:\n    ", checkpointPath);
+        OPTITER = len(eval0); 
+        optimizationCallN -= OPTITER;
+        with open(MODELNAME + "/pars.pickle", "rb") as handle:
+            optParDict = pickle.load(handle);
+        OPTACCU = optParDict["accuracy"];
+        OPTASTD = optParDict["accuSTD"];
+        print("Current optimal accuracy:");
+        print("   ", OPTACCU, "+/-", (OPTASTD if (OPTASTD > 0) else "NA"));
+    except FileNotFoundError:
+        print("Saving checkpoint file:\n    ", checkpointPath);
+    except:
+        raise;
+    #main optimization
+    result = gp_minimize(func=fitFunc, dimensions=dims, x0=par0, y0=eval0, acq_func="EI",\
+                         n_calls=optimizationCallN, callback=[checkpointSaver]);
+    #retraining optimal
+    print("###########################################################RETRAIN OPTIMAL MODEL");
+    model = tf.keras.models.load_model(MODELNAME);
+    histDF = pd.read_pickle(MODELNAME + "/history.pickle");
+    optParDict = {};
+    with open(MODELNAME + "/pars.pickle", "rb") as handle:
+        optParDict = pickle.load(handle);
+    validationRatio     = 0.1; 
+    learnEpochN         = 20;
+    dropoutMonteCarloN  = 1;#30;
+    parOpt = [optParDict["convLayerN"], optParDict["convFilterN"],\
+              optParDict["denseLayerN"], optParDict["denseNeutronN"],\
+              optParDict["learningRate"], optParDict["activationFunc"],\
+              optParDict["initializationFunc"]];
+    fitFunc = fitFuncLambda(targetN, inputShape, inputXNorm, inputY,\
+                            validationRatio, learnEpochN, dropoutMonteCarloN,\
+                            pretrainedLayers=pretrainedLayers);
+    optAccuracy = fitFunc(parOpt);
+##############################################################################################
+    #loading
+    model = tf.keras.models.load_model(MODELNAME);
+    histDF = pd.read_pickle(MODELNAME + "/history.pickle");
+    optParDict = {};
+    with open(MODELNAME + "/pars.pickle", "rb") as handle:
+        optParDict = pickle.load(handle);
+    #evaluating
+    model.evaluate(x=testXNorm, y=testY);
+    histDF.plot(figsize=(8, 5));
+    plt.title("Learning Performance History");
+    plt.grid("True");
+    plt.gca().set_ylim(0.0, 1.0);
+    filenameFig = EXEPATH + "/fashionFig/-fashionHistory.png";
+    plt.savefig(filenameFig);
+    plt.close();
+    print("Saving the following figures:\n    ", filenameFig);
+    #predicting
+    predValY = model.predict(testXNorm);
+    predY = np.argmax(predValY, axis=-1);
+    for idx, valX in enumerate(testX[:printFigN]):
+        print(idx, nameY[predY[idx]], nameY[testY[idx]]);
+        plt.imshow(valX, cmap=plt.cm.binary);
+        plt.title("Prediction: "+nameY[predY[idx]], fontsize=24);
+        filenameFig = EXEPATH + "/fashionFig/predFashion"+str(idx)+".png";
+        plt.savefig(filenameFig, dpi=50);
+        plt.close();
+        print("   ", filenameFig);
+
+
+
+
+
+
+##############################################################################################
+############################################################################################## 
 ##############################################################################################
 def cloneLayer(layer):
     config = layer.get_config();
@@ -105,7 +292,7 @@ def printTSNE(encodedXInput, knownYInput, nameY, figName):
     fig.colorbar(plot, ax=ax[0], format=labelFormat, ticks=np.arange(minY, maxY+1));
     ax[0].set_title("Encoder t-SNE Visualization");
     
-    filenameFig = exepath + "/fashionFig/-" + figName + ".png";
+    filenameFig = EXEPATH + "/fashionFig/-" + figName + ".png";
     gs.tight_layout(fig);
     plt.savefig(filenameFig, dpi=200);
     plt.close();
@@ -144,9 +331,6 @@ def buildModel(convLayerN, convFilterN, denseLayerN, denseNeuronN,\
                   loss=tf.keras.losses.sparse_categorical_crossentropy,\
                   metrics=["accuracy"]);
     return model;
-OPTITER = 0;
-OPTACCU = 0;
-OPTASTD = 0;
 def learningRateFunc(epoch, initLR, minLR, decayC):
     return initLR*pow(0.1, 1.0*epoch/decayC) + minLR;
 def schedulerLambda(initLR, minLR, decayC):
@@ -167,7 +351,7 @@ def fitFuncGen(convLayerN, convFilterN, denseLayerN, denseNeuronN,\
              str(learningRate) + "-" + str(actFunc) + "-" + str(initFunc); 
     print("##################################################################BEGIN", OPTITER);
     print("Parameters:", parStr);
-    tensorboardModelDir = exepath + "/" + MODELNAME + "/tensorboardModelDir/";
+    tensorboardModelDir = EXEPATH + "/" + MODELNAME + "/tensorboardModelDir/";
     tensorboardModelDir += str(int(time.time())) + "--" + parStr;
     tensorboard = tf.keras.callbacks.TensorBoard(log_dir=tensorboardModelDir,\
                                                  histogram_freq=0,\
@@ -234,194 +418,10 @@ def fitFuncLambda(targetN, inputShape, trainX, trainY, valiR, epochN, dropMCN,\
 
 
 
-
-
-
-##############################################################################################
-##############################################################################################
-##############################################################################################
 if __name__ == "__main__":
-    exepath = os.path.dirname(os.path.abspath(__file__));
-
-    fashionData = tf.keras.datasets.fashion_mnist;
-    [[inputXFull, inputYFull], [testX, testY]] = fashionData.load_data();
-    nameY = ["T-shirt", "Trouser", "Pullover", "Dress", "Coat",\
-             "Sandal", "Shirt", "Sneaker", "Bag", "Boot"];
-    #dropping some labels to simulate unlabeld conditions
-    dropRate = 0.8;
-    np.random.seed(1);
-    inputY = [];
-    for y in inputYFull:
-        if np.random.uniform() < dropRate:
-            inputY.append(float("NaN"));
-        else:
-            inputY.append(y);
-    #####################################################
-    inputXNorm = tf.keras.utils.normalize(inputXFull, axis=1);
-    testXNorm  = tf.keras.utils.normalize(testX, axis=1);
-    targetN = len(nameY);
-    inputShape = [inputXNorm.shape[1], inputXNorm.shape[2], 1];   #note: needed for conv2D
-    inputXNorm = inputXNorm.reshape(inputXNorm.shape[0], *inputShape);
-    testXNorm  = testXNorm .reshape(testXNorm .shape[0], *inputShape);
-#####autoencoder##############################################################################
-    pretrainedLayers = []
-    '''
-    printFigN  = 20;
-    encodedXuntrained = None;
-    trainX, validX, trainY, validY = train_test_split(inputXNorm, inputY, test_size=0.1,\
-                                                      shuffle=False);
-    #############Adjustables#############
-    autoEpochN = 100; 
-    #####################################
-    encoder = buildEncoderConv(inputShape, regularization="dropout");
-    encoderOutputShape = list(encoder.layers[-1].output_shape);
-    encoderOutputShape = [dim for dim in encoderOutputShape if dim is not None];
-    decoder = buildDecoderConv(inputShape=encoderOutputShape);
-
-    autoEncoder = buildAutoEncoder(encoder, decoder);
-    encodedXuntrained = encoder.predict(validX);
-    tensorboardAutoDir = exepath + "/" + MODELNAME + "/tensorboardAutoDir/";
-    tensorboardAutoDir += str(int(time.time())) + "Conv"; 
-    tensorboardAuto = tf.keras.callbacks.TensorBoard(tensorboardAutoDir);
-    history = autoEncoder.fit(trainX, trainX, validation_data=(validX, validX),\
-                              epochs=autoEpochN, callbacks=[tensorboardAuto]);
-    encoder    .save(MODELNAME+"/zEncoder.model");
-    decoder    .save(MODELNAME+"/zDecoder.model");
-    autoEncoder.save(MODELNAME+"/zAutoEncoder.model");
-    os.rename(tensorboardAutoDir, \
-              tensorboardAutoDir.replace("tensorboardAutoDir/", "tensorboardAutoDir/Fin"));
-    #compressed figures   
-    encoder     = tf.keras.models.load_model(MODELNAME+"/zEncoder.model", compile=False);
-    decoder     = tf.keras.models.load_model(MODELNAME+"/zDecoder.model", compile=False);
-    autoEncoder = tf.keras.models.load_model(MODELNAME+"/zAutoEncoder.model", compile=False);
-    if printFigN > 0:
-        print("Saving the following figures:");
-        encodedX = encoder.predict(validX);
-        cmprsX   = autoEncoder.predict(validX);
-        validX = validX.reshape(*validX.shape[:-1]);
-        cmprsX = cmprsX.reshape(*cmprsX.shape[:-1]);
-        printTSNE(encodedXuntrained, validY, nameY, "fashionConv"+"TSNEuntrained");
-        printTSNE(encodedX,          validY, nameY, "fashionConv"+"TSNE");
-        for idx, valX in enumerate(validX[:printFigN]):
-            fig = plt.figure(figsize=(12, 6));
-            gs = gridspec.GridSpec(1, 2);
-            ax = [];
-            for i in range (gs.nrows*gs.ncols):
-                ax.append(fig.add_subplot(gs[i]));
-            ax[0].imshow(valX, cmap=plt.cm.binary);
-            ax[0].set_title("Original Normalized", fontsize=24);
-            ax[1].imshow(cmprsX[idx], cmap=plt.cm.binary);
-            ax[1].set_title("Autoencoder Compressed", fontsize=24); 
-            filenameFig = exepath + "/fashionFig/cmprsFashionConv"+str(idx)+".png";
-            plt.savefig(filenameFig, dpi=50);
-            plt.close();
-            print("   ", filenameFig);
-    #encoder for autoencoder pretraining
-    encoder = tf.keras.models.load_model(MODELNAME+"/zEncoder.model", compile=False);
-    for i, layer in enumerate(encoder.layers):
-        if isinstance(layer, tf.keras.layers.Conv2D):
-            #layer.trainable = False;
-            pretrainedLayers.append(layer);
-    '''
-    #dropping out untagged events
-    inputXNorm, inputY = dropNaNY(inputXNorm, inputY);
-#####modeling#################################################################################
-    '''
-    #############Adjustables#############
-    validationRatio     = 0.1;
-    learnEpochN         = 6;
-    dropoutMonteCarloN  = 10;
-    optimizationCallN   = 30; #note: need >= 11
-    par0 = [3, 256, 3, 128, pow(10, -3), "elu", "he_normal"];
-    #####################################  
-    convLayerN   = Integer(low=1,  high=5, name="convLayerNum");
-    convFilterN  = Categorical(categories=[32, 64, 128, 256, 512], name="convFilterNum");
-    denseLayerN  = Integer(low=1,  high=5, name="denseLayerNum");
-    denseNeuronN = Integer(low=10, high=500, name="denseNeuronN");
-    learningRate = Real(low=pow(10, -6), high=pow(10, -1),\
-                        prior="log-uniform", name="learningRate");
-    actFunc  = Categorical(categories=["elu", "selu"], name="activationFunc");
-    initFunc = Categorical(categories=["he_normal", "he_uniform"], name="initializationFunc");
-    dims = [convLayerN,convFilterN,denseLayerN,denseNeuronN,learningRate,actFunc,initFunc];
-    fitFunc = fitFuncLambda(targetN, inputShape, inputXNorm, inputY, \
-                            validationRatio, learnEpochN, dropoutMonteCarloN,\
-                            pretrainedLayers=pretrainedLayers);
-    checkpointPath = exepath+"/"+MODELNAME+"/checkpoint.pkl";
-    checkpointSaver = CheckpointSaver(checkpointPath, compress=9, store_objective=False);
-    eval0 = None;
-    optParDict = {};
-    #restore gp_minimize##################Remember to delete the .pkl file when changing model
-    try:
-        restoredOpt = load_gp_minimize(checkpointPath);
-        par0, eval0 = restoredOpt.x_iters, restoredOpt.func_vals;
-        print("Reading the checkpoint file:\n    ", checkpointPath);
-        OPTITER = len(eval0); 
-        optimizationCallN -= OPTITER;
-        with open(MODELNAME + "/pars.pickle", "rb") as handle:
-            optParDict = pickle.load(handle);
-        OPTACCU = optParDict["accuracy"];
-        OPTASTD = optParDict["accuSTD"];
-        print("Current optimal accuracy:");
-        print("   ", OPTACCU, "+/-", (OPTASTD if (OPTASTD > 0) else "NA"));
-    except FileNotFoundError:
-        print("Saving checkpoint file:\n    ", checkpointPath);
-    except:
-        raise;
-    #main optimization
-    result = gp_minimize(func=fitFunc, dimensions=dims, x0=par0, y0=eval0, acq_func="EI",\
-                         n_calls=optimizationCallN, callback=[checkpointSaver]);
-    #retraining optimal
-    print("###########################################################RETRAIN OPTIMAL MODEL");
-    model = tf.keras.models.load_model(MODELNAME);
-    histDF = pd.read_pickle(MODELNAME + "/history.pickle");
-    optParDict = {};
-    with open(MODELNAME + "/pars.pickle", "rb") as handle:
-        optParDict = pickle.load(handle);
-    validationRatio     = 0.1; 
-    learnEpochN         = 20;
-    dropoutMonteCarloN  = 30;
-    parOpt = [optParDict["convLayerN"], optParDict["convFilterN"],\
-              optParDict["denseLayerN"], optParDict["denseNeutronN"],\
-              optParDict["learningRate"], optParDict["activationFunc"],\
-              optParDict["initializationFunc"]];
-    fitFunc = fitFuncLambda(targetN, inputShape, inputXNorm, inputY,\
-                            validationRatio, learnEpochN, dropoutMonteCarloN,\
-                            pretrainedLayers=pretrainedLayers);
-    optAccuracy = fitFunc(parOpt);
-    '''
-##############################################################################################
-    #loading
-    model = tf.keras.models.load_model(MODELNAME);
-    histDF = pd.read_pickle(MODELNAME + "/history.pickle");
-    optParDict = {};
-    with open(MODELNAME + "/pars.pickle", "rb") as handle:
-        optParDict = pickle.load(handle);
-    #evaluating
-    model.evaluate(x=testXNorm, y=testY);
-    histDF.plot(figsize=(8, 5));
-    plt.title("Learning Performance History");
-    plt.grid("True");
-    plt.gca().set_ylim(0.0, 1.0);
-    filenameFig = exepath + "/fashionFig/-fashionHistory.png";
-    plt.savefig(filenameFig);
-    plt.close();
-    print("Saving the following figures:\n    ", filenameFig);
-    #predicting
-    predValY = model.predict(testXNorm);
-    predY = np.argmax(predValY, axis=-1);
-    for idx, valX in enumerate(testX):
-        print(idx, nameY[predY[idx]], nameY[testY[idx]]);
-        plt.imshow(valX, cmap=plt.cm.binary);
-        plt.title("Prediction: "+nameY[predY[idx]], fontsize=24);
-        filenameFig = exepath + "/fashionFig/predFashion"+str(idx)+".png";
-        plt.savefig(filenameFig, dpi=50);
-        plt.close();
-        print("   ", filenameFig);
+    main();    
 
 
 
 
 
-
-
- 

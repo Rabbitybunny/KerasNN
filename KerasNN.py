@@ -407,9 +407,9 @@ def fitFuncGen(learningRate, targetN, inputShape, inputX, inputY,\
         OPTACCU = 1.0*accuracy;
         OPTASTD = max(1.0*accuSTD, 0.0);
         histDF = pd.DataFrame(history.history);
-        optParDict = {"accuracy":           accuracy,\
-                      "accuSTD":            accuSTD,\
-                      "learningRate":       learningRate};
+        optParDict = {"accuracy":     accuracy,\
+                      "accuSTD":      accuSTD,\
+                      "learningRate": learningRate};
         model.save(MODELNAME);
         histDF.to_pickle(MODELNAME + "/history.pickle");
         with open(MODELNAME + "/pars.pickle", "wb") as handle:

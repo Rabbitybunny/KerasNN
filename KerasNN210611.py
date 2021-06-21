@@ -33,6 +33,7 @@ def main():
     [[inputXFull, inputYFull], [testX, testY]] = fashionData.load_data();
     nameY = ["T-shirt", "Trouser", "Pullover", "Dress", "Coat",\
              "Sandal", "Shirt", "Sneaker", "Bag", "Boot"];
+    printFigN = 20;
     #dropping some labels to simulate unlabeld conditions
     dropRate = 0.8;
     np.random.seed(1);
@@ -52,7 +53,6 @@ def main():
 #####autoencoder##############################################################################
     pretrainedLayers = []
     #'''
-    printFigN  = 20;
     encodedXuntrained = None;
     trainX, validX, trainY, validY = train_test_split(inputXNorm, inputY, test_size=0.1,\
                                                       shuffle=False);
@@ -195,9 +195,7 @@ def main():
     #predicting
     predValY = model.predict(testXNorm);
     predY = np.argmax(predValY, axis=-1);
-    for idx, valX in enumerate(testX):
-        if idx > 30:
-            break;
+    for idx, valX in enumerate(testX[:printFigN]):
         print(idx, nameY[predY[idx]], nameY[testY[idx]]);
         plt.imshow(valX, cmap=plt.cm.binary);
         plt.title("Prediction: "+nameY[predY[idx]], fontsize=24);
