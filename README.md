@@ -1,4 +1,7 @@
 # Keras Neural Network on MNIST Fashion Data
+These are python3 code more or less following
+_Hands-On Machine Learning with Scikit-Learn, Keras, and TensorFlow: Concepts, Tools, and Techniques to Build Intelligent Systems 2nd Edition_
+from Aurélien Géron.
 
 210410: loss: 0.4219 - accuracy: 0.8789<br/>
 &ensp;&ensp; Uses RandomizedSearchCV to randomly search for the best parameters for the model
@@ -18,12 +21,19 @@
 210422: loss: 0.2855 - accuracy: 0.8973<br/>
 &ensp;&ensp; Applies the convolutional neural network using conv2D
 
-210521: loss: 0.3895 - accuracy: 0.8590 (80% samples set untagged)<br/>
+210617: loss: 0.3940 - accuracy: 0.9022<br/>
+&ensp;&ensp; Applies the residual neural network
+
+This final result of ResNet is not quite satisfactory; it's likely causes by a mistake in input data normalization. May have to every step all over again.
+
+### With 80% samples set as untagged:
+
+210521: loss: 0.3895 - accuracy: 0.8590<br/>
 &ensp;&ensp; Applies autoencoder unsupervised pretraining with tagged+untagged samples<br/>
 &ensp;&ensp; The remaining tagged ~300sample/10features<br/>
 &ensp;&ensp; Without pretraining: loss: 0.4145 - accuracy: 0.8487  
 
-210611: loss: 0.3919 - accuracy: 0.8827 (80% samples set untagged + autoencoder)<br/>
+210611: loss: 0.3919 - accuracy: 0.8827 (+ autoencoder)<br/>
 &ensp;&ensp; Applies the residual neural network with a residualBlock() function
 &ensp;&ensp; Not using the full power, only
 
