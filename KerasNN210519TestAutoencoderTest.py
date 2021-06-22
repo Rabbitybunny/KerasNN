@@ -25,6 +25,12 @@ from skopt.space import Integer, Real, Categorical
 
 MODELNAME="mnistFashion210519.model";
 
+def stand2dArray(array):    #following tf.image.per_image_standardization
+    array = np.array(array);
+    flatArr = array.flatten();
+    mean = np.mean(flatArr);
+    std = np.std(flatArr);
+    return (array - mean)/max(std, 1/math.sqrt(flatArr.size));
 def roundedAccuracy(yTrue, yPred):
     return tf.keras.metrics.binary_accuracy(tf.round(yTrue), tf.round(yPred))
 def buildAutoEncoder(encoder, decoder):
@@ -248,8 +254,8 @@ if __name__ == "__main__":
     [[inputX, inputY], [testX, testY]] = fashionData.load_data();
     nameY = ["T-shirt", "Trouser", "Pullover", "Dress", "Coat",\
              "Sandal", "Shirt", "Sneaker", "Bag", "Boot"];
-    inputXNorm = tf.keras.utils.normalize(inputX, axis=1);
-    testXNorm  = tf.keras.utils.normalize(testX, axis=1);
+    inputXNorm = np.array([stand2dArray(X) for X in inputX]);
+    testXNorm  = np.array([stand2dArray(X) for X in testX]);
     targetN = len(nameY);
     inputShape = [inputXNorm.shape[1], inputXNorm.shape[2], 1];   #note: needed for conv2D
     inputXNorm = inputXNorm.reshape(inputXNorm.shape[0], *inputShape);

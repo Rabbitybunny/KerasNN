@@ -7,6 +7,12 @@ import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 import pickle
 
+def stand2dArray(array):    #following tf.image.per_image_standardization
+    array = np.array(array);
+    flatArr = array.flatten();
+    mean = np.mean(flatArr);
+    std = np.std(flatArr);
+    return (array - mean)/max(std, 1/math.sqrt(flatArr.size));
 def buildModel(targetN=10, input_shape=[28, 28], \
                hiddenN=2, neuronN=100, learningRate=0.01):
     model = tf.keras.models.Sequential();
@@ -26,8 +32,8 @@ if __name__ == "__main__":
     [[trainX, trainY], [testX, testY]] = fashionData.load_data();
     nameY = ["T-shirt", "Trouser", "Pullover", "Dress", "Coat",\
              "Sandal", "Shirt", "Sneaker", "Bag", "Boot"];
-    trainXNorm = tf.keras.utils.normalize(trainX, axis=1);
-    testXNorm  = tf.keras.utils.normalize(testX, axis=1);  
+    trainXNorm = np.array([stand2dArray(X) for X in trainX])
+    testXNorm  = np.array([stand2dArray(X) for X in testX])
     '''
     #modeling
     epochN = 30;

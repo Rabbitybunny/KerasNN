@@ -15,6 +15,14 @@ import tensorflow.keras.backend as K
 from skopt import gp_minimize
 from skopt.space import Real, Categorical, Integer
 
+
+def stand2dArray(array):    #following tf.image.per_image_standardization
+    array = np.array(array);
+    flatArr = array.flatten();
+    mean = np.mean(flatArr);
+    std = np.std(flatArr);
+    return (array - mean)/max(std, 1/math.sqrt(flatArr.size));
+
 MODELNAME="mnistFashion210416.model";
 LOWLAYERTHRES=3;
 def buildModel(denseLayerN, denseNeuronN, learningRate, actFunc, initFunc,\
@@ -130,8 +138,9 @@ if __name__ == "__main__":
     [[inputX, inputY], [testX, testY]] = fashionData.load_data();
     nameY = ["T-shirt", "Trouser", "Pullover", "Dress", "Coat",\
              "Sandal", "Shirt", "Sneaker", "Bag", "Boot"];
-    inputXNorm = tf.keras.utils.normalize(inputX, axis=1);
-    testXNorm  = tf.keras.utils.normalize(testX, axis=1);  
+    inputXNorm = np.array([stand2dArray(X) for X in inputX]);
+    testXNorm  = np.array([stand2dArray(X) for X in testX]);
+
     targetN = 10;
     inputShape = [28, 28];
     '''

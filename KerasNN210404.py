@@ -1,4 +1,4 @@
-import sys, os, time
+import sys, os, time, math
 import numpy as np
 import pandas as pd
 import tensorflow as tf
@@ -7,14 +7,25 @@ import matplotlib.image as mpimg
 import random
 import pickle
 
+
+def stand2dArray(array):    #following tf.image.per_image_standardization
+    array = np.array(array);
+    flatArr = array.flatten();
+    mean = np.mean(flatArr);
+    std = np.std(flatArr);
+    return (array - mean)/max(std, 1/math.sqrt(flatArr.size));
+
+
 if __name__ == "__main__":
+    printFigN = 20;
+
     fashionData = tf.keras.datasets.fashion_mnist;
     [[trainX, trainY], [testX, testY]] = fashionData.load_data();
     nameY = ["T-shirt", "Trouser", "Pullover", "Dress", "Coat",\
              "Sandal", "Shirt", "Sneaker", "Bag", "Boot"];
-    trainXNorm = tf.keras.utils.normalize(trainX, axis=1);
-    testXNorm  = tf.keras.utils.normalize(testX, axis=1);  
- 
+    trainXNorm = np.array([stand2dArray(X) for X in trainX]);
+    testXNorm  = np.array([stand2dArray(X) for X in testX]);
+
     exepath = os.path.dirname(os.path.abspath(__file__));
     print("Saving the following figures:");
     ''' 
@@ -65,7 +76,7 @@ if __name__ == "__main__":
 
     predValY = model.predict(testXNorm);
     predY = np.argmax(predValY, axis=-1);
-    for i, valX in enumerate(testX):
+    for i, valX in enumerate(testX[:printFigN]):
         print(i, nameY[predY[i]], nameY[testY[i]]);
         plt.imshow(valX, cmap=plt.cm.binary);
         plt.title("Prediction: "+nameY[predY[i]], fontsize=24);

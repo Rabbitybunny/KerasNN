@@ -13,6 +13,12 @@ from tensorflow.keras.activations import *
 from skopt import gp_minimize
 from skopt.space import Real, Categorical, Integer
 
+def stand2dArray(array):    #following tf.image.per_image_standardization
+    array = np.array(array);
+    flatArr = array.flatten();
+    mean = np.mean(flatArr);
+    std = np.std(flatArr);
+    return (array - mean)/max(std, 1/math.sqrt(flatArr.size));
 def buildModel(denseLayerN, denseNeuronN, learningRate, activationFunc,\
                targetN, inputShape):
     model = tf.keras.models.Sequential();
@@ -70,8 +76,8 @@ if __name__ == "__main__":
     [[trainX, trainY], [testX, testY]] = fashionData.load_data();
     nameY = ["T-shirt", "Trouser", "Pullover", "Dress", "Coat",\
              "Sandal", "Shirt", "Sneaker", "Bag", "Boot"];
-    trainXNorm = tf.keras.utils.normalize(trainX, axis=1);
-    testXNorm  = tf.keras.utils.normalize(testX, axis=1);  
+    trainXNorm = np.array([stand2dArray(X) for X in trainX]);
+    testXNorm  = np.array([stand2dArray(X) for X in testX]);
     targetN = 10;
     inputShape = [28, 28];
     '''

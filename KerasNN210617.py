@@ -43,8 +43,8 @@ def main():
         else:
             inputY.append(y);
     #####################################################
-    inputXNorm = tf.keras.utils.normalize(inputXFull, axis=1);
-    testXNorm  = tf.keras.utils.normalize(testX, axis=1);
+    inputXNorm = np.array([stand2dArray(X) for X in inputXFull]);
+    testXNorm  = np.array([stand2dArray(X) for X in testX]);
     targetN = len(nameY);
     inputShape = [inputXNorm.shape[1], inputXNorm.shape[2], 1];   #note: needed for conv2D
     inputXNorm = inputXNorm.reshape(inputXNorm.shape[0], *inputShape);
@@ -207,6 +207,12 @@ def main():
 ##############################################################################################
 ##############################################################################################
 ##############################################################################################
+def stand2dArray(array):    #following tf.image.per_image_standardization
+    array = np.array(array);
+    flatArr = array.flatten();
+    mean = np.mean(flatArr);
+    std = np.std(flatArr);
+    return (array - mean)/max(std, 1/math.sqrt(flatArr.size));
 def cloneLayer(layer):
     config = layer.get_config();
     weights = layer.get_weights();
