@@ -1,4 +1,4 @@
-import sys, os, time, math
+import sys, os, pathlib, time, math
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -22,15 +22,17 @@ from skopt.callbacks import CheckpointSaver
 from skopt import load as load_gp_minimize
 from skopt.space import Integer, Real, Categorical
 OPTITER, OPTACCU, OPTASTD = 0, 0, 0;
+EXEPATH = os.path.dirname(os.path.abspath(__file__));
+FIGPATH = EXEPATH + "/fashionFig/";
+pathlib.Path(FIGPATH).mkdir(exist_ok=True)
+
 
 
 MODELNAME = "mnistFashion210708.model"
-EXEPATH = os.path.dirname(os.path.abspath(__file__));
-FIGPATH = EXEPATH + "/fashionFig/";
 def main():
     runTraining = True;
 
-    printFigN = 20;
+    printFigN = 10;
     np.random.seed(1); 
     #dataset 
     dropRate        = 0.8;          #ratio of data to simulate unlabeled Y's
@@ -59,20 +61,30 @@ def main():
     [[inputXFull, inputYFull], [testX, testY]] = fashionData.load_data();
     nameY = ["T-shirt", "Trouser", "Pullover", "Dress", "Coat",\
              "Sandal", "Shirt", "Sneaker", "Bag", "Boot"];
-    #####################################################
+    #simulate unlabeled Y's
     inputY = [];
     for y in inputYFull:
         if np.random.uniform() < dropRate:
             inputY.append(float("NaN"));
         else:
             inputY.append(y);
-    #####################################################
+    #data normalization/standardization
     inputXNorm = np.array([stand2dArray(X) for X in inputXFull]);
     testXNorm  = np.array([stand2dArray(X) for X in testX]);
     targetN = len(nameY);
     inputShape = [inputXNorm.shape[1], inputXNorm.shape[2], 1];   #note: needed for conv2D
     inputXNorm = inputXNorm.reshape(inputXNorm.shape[0], *inputShape);
     testXNorm  = testXNorm .reshape(testXNorm .shape[0], *inputShape);
+    #raw figures
+    if runTraining == True:
+        for idx, valX in enumerate(inputXFull[:printFigN]):
+            print(idx, nameY[inputYFull[idx]]);
+            plt.imshow(valX, cmap=plt.cm.binary);
+            plt.title(nameY[inputYFull[idx]], fontsize=24);
+            filenameFig = FIGPATH + "raw"+str(idx)+".png";
+            plt.savefig(filenameFig, dpi=100);
+            plt.close();
+            print("   ", filenameFig);
 #####autoencoder##############################################################################
     pretrainedLayers = []
     if (runTraining == True) and (autoEpochN > 0):
@@ -80,7 +92,7 @@ def main():
         encodedXuntrained = None;
         trainX, validX, trainY, validY = train_test_split(inputXNorm, inputY, test_size=0.1,\
                                                           shuffle=False);
-        #####################################
+        #train encoder, decoder, autoencoder
         encoder = buildEncoderConv(inputShape, regularization="dropout");
         encoderOutputShape = list(encoder.layers[-1].output_shape);
         encoderOutputShape = [s for s in encoderOutputShape if s is not None];
@@ -121,7 +133,7 @@ def main():
                 ax[1].imshow(cmprsX[idx], cmap=plt.cm.binary);
                 ax[1].set_title("Autoencoder Compressed", fontsize=24); 
                 filenameFig = FIGPATH + "compressed"+str(idx)+".png";
-                plt.savefig(filenameFig, dpi=50);
+                plt.savefig(filenameFig, dpi=100);
                 plt.close();
                 print("   ", filenameFig);
         #encoder for autoencoder pretraining
@@ -130,7 +142,7 @@ def main():
             if isinstance(layer, tf.keras.layers.Conv2D):
                 #layer.trainable = False;
                 pretrainedLayers.append(layer);
-#####modeling#################################################################################
+#####searching for optimal model##############################################################
     inputXNorm, inputY = dropNaNY(inputXNorm, inputY);  #dropping out untagged events
     if (runTraining == True) and (optimizationCallN > 0):
         print("#################################################SEARCHING FOR OPTIMAL MODEL");
@@ -140,8 +152,7 @@ def main():
         checkpointPath = EXEPATH + "/" + MODELNAME + "/checkpoint.pkl";
         checkpointSaver = CheckpointSaver(checkpointPath, compress=9, store_objective=False);
         eval0 = None;
-        #restore gp_minimize#################
-        #Remember to delete the .pkl file when changing model
+        #restore gp_minimize: remember to delete the .pkl file when changing model
         global OPTITER, OPTACCU, OPTASTD;
         try:
             restoredOpt = load_gp_minimize(checkpointPath);
@@ -164,7 +175,7 @@ def main():
         if (runTraining == True) and (optimizationCallN > 0):
             result=gp_minimize(func=fitFunc, dimensions=dims,x0=par0,y0=eval0, acq_func="EI",\
                                n_calls=optimizationCallN, callback=[checkpointSaver]);
-    #retraining optimal
+#####retrain optimal model####################################################################
     if runTraining == True:
         print("#######################################################RETRAIN OPTIMAL MODEL");
         parOpt = [];
@@ -185,14 +196,20 @@ def main():
                                    validationRatio, learningEpochNOpt, dropoutMonteCarloNOpt,\
                                    pretrainedLayers=pretrainedLayers);
         optAccuracy = fitFuncOpt(parOpt);
-##############################################################################################
-    #loading
-    model = tf.keras.models.load_model(MODELNAME);
-    histDF = pd.read_pickle(MODELNAME + "/history.pickle");
-    optParDict = {};
-    with open(MODELNAME + "/pars.pickle", "rb") as handle:
-        optParDict = pickle.load(handle);
-    #evaluating
+####prediction################################################################################
+    #loading trained data
+    try:
+        model = tf.keras.models.load_model(MODELNAME);
+        histDF = pd.read_pickle(MODELNAME + "/history.pickle");
+        optParDict = {};
+        with open(MODELNAME + "/pars.pickle", "rb") as handle:
+            optParDict = pickle.load(handle);
+    except OSError or FileNotFoundError:
+        print("No trained model is found:\n    ", MODELNAME);
+        sys.exit(0);
+    except:
+        raise;
+    #evaluation
     model.evaluate(x=testXNorm, y=testY);
     histDF.plot(figsize=(8, 5));
     plt.title("Learning Performance History");
@@ -202,7 +219,7 @@ def main():
     plt.savefig(filenameFig);
     plt.close();
     print("Saving the following figures:\n    ", filenameFig);
-    #predicting
+    #prediction figures
     predValY = model.predict(testXNorm);
     predY = np.argmax(predValY, axis=-1);
     for idx, valX in enumerate(testX[:printFigN]):
@@ -210,7 +227,7 @@ def main():
         plt.imshow(valX, cmap=plt.cm.binary);
         plt.title("Prediction: "+nameY[predY[idx]], fontsize=24);
         filenameFig = FIGPATH + "predicted"+str(idx)+".png";
-        plt.savefig(filenameFig, dpi=50);
+        plt.savefig(filenameFig, dpi=100);
         plt.close();
         print("   ", filenameFig);
 
@@ -301,16 +318,19 @@ def fitFuncGen(pars, dims, targetN, inputShape, inputX, inputY,\
     parStr = parStr[:-1];
     print("##############################################################BEGIN", OPTITER);
     print("Parameters:", parStr);
+    callbacks=[]
     tensorboardModelDir = EXEPATH + "/" + MODELNAME + "/tensorboardModelDir/";
     tensorboardModelDir += str(int(time.time())) + "--" + parStr;
     tensorboard = tf.keras.callbacks.TensorBoard(log_dir=tensorboardModelDir,\
-                                                 histogram_freq=0,\
-                                                 write_graph=True,\
-                                                 write_grads=False,\
-                                                 write_images=False);
-    schedulerFunc = schedulerLambda(parDict["learningRate"], minLearningRate,\
-                                    scheduleExpDecayConst);
-    scheduler = tf.keras.callbacks.LearningRateScheduler(schedulerFunc);
+                                                 histogram_freq=0, write_graph=True,\
+                                                 write_grads=False, write_images=False);
+    callbacks.append(tensorboard);
+    if "learningRate" in parDict.keys():
+        schedulerFunc = schedulerLambda(parDict["learningRate"], minLearningRate,\
+                                        scheduleExpDecayConst);
+        scheduler = tf.keras.callbacks.LearningRateScheduler(schedulerFunc);
+        callbacks.append(scheduler);
+
     trainX, validX, trainY, validY = train_test_split(inputX, inputY, test_size=valiR);
     accuracies = [];
     for dropSeed in range(dropMCN):
@@ -318,7 +338,7 @@ def fitFuncGen(pars, dims, targetN, inputShape, inputX, inputY,\
         model=buildModel(pars, dims, targetN, inputShape,\
                          dropoutMCSeed=dropSeed, pretrainedLayers=pretrainedLayers);
         history = model.fit(trainX, trainY, validation_data=(validX, validY),\
-                            epochs=epochN, callbacks=[tensorboard, scheduler]);
+                            epochs=epochN, callbacks=callbacks);
         accuracies.append(history.history["val_accuracy"][-1]);
         print("Drop-Seed", dropSeed, "Accuracy =", accuracies[dropSeed]);
         if accuracies[dropSeed] < (OPTACCU - 6*OPTASTD):
@@ -425,7 +445,7 @@ def printTSNE(encodedXInput, knownYInput, nameY, figName):
     
     filenameFig = FIGPATH + "-" + figName + ".png";
     gs.tight_layout(fig);
-    plt.savefig(filenameFig, dpi=200);
+    plt.savefig(filenameFig, dpi=100);
     plt.close();
     print("   ", filenameFig);
 #helper funcs#################################################################################
