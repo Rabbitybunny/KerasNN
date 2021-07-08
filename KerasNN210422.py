@@ -44,7 +44,7 @@ def buildModel(convLayerN, convFilterN, denseLayerN, denseNeuronN,\
     for i in range(convLayerN):
         if pow(2, i+1) < min(inputShape[0], inputShape[1]): 
             model.add(tf.keras.layers.MaxPool2D(pool_size=(2, 2)));
-        filterN = max(8, convLayerN/pow(2, convLayerN-1-i));
+        filterN = max(8, convFilterN/pow(2, convLayerN-1-i));
         model.add(tf.keras.layers.Conv2D(filterN, 3, activation=actFunc, padding="SAME"));
     model.add(tf.keras.layers.Flatten());
     for i in range(denseLayerN):
