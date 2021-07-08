@@ -22,7 +22,7 @@ from skopt.callbacks import CheckpointSaver
 from skopt import load as load_gp_minimize
 from skopt.space import Integer, Real, Categorical
 OPTITER, OPTACCU, OPTASTD = 0, 0, 0;
-EXEPATH = os.path.dirname(os.path.abspath(__file__));
+EXEPATH = str(pathlib.Path().absolute());
 FIGPATH = EXEPATH + "/fashionFig/";
 pathlib.Path(FIGPATH).mkdir(exist_ok=True)
 
@@ -30,38 +30,60 @@ pathlib.Path(FIGPATH).mkdir(exist_ok=True)
 
 MODELNAME = "mnistFashion210708.model"
 def main():
-    runTraining = True;
-
+    trainOn   = True;
     printFigN = 10;
-    np.random.seed(1); 
+
     #dataset 
-    dropRate        = 0.8;          #ratio of data to simulate unlabeled Y's
+    dropRate        = 0.0;          #ratio of data to simulate unlabeled Y's
     validationRatio = 0.1;          #ratio of data for validation
-    #autoencoder                    autoEpochN = 0 to turn off 
-    autoEpochN = 0;#30;
-    #search for optimal model       optimizationCallN  = 0 to turn off (need >=11 to turn on)
-    optimizationCallN  = 0;#20;
-    learningEpochN     = 6;
-    dropoutMonteCarloN = 10;
+
+    #trainings
+    trainAutoencoderOn    = False;
+    autoEpochN            = 30;
     
+    optModelSearchOn      = True;
+    optimizationCallN     = 20;
+    learningEpochN        = 6;
+    dropoutMonteCarloN    = 10;
+    
+    retrainOptModelOn     = True;
+    learningEpochNOpt     = 30;
+    dropoutMonteCarloNOpt = 30;
+
+    #model setup
     learningRate = Real(   low=1E-6, high=1E-1, prior="log-uniform", name="learningRate");
     convLayerN   = Integer(low=1,    high=5,                         name="convLayerN");
     convFilterN  = Categorical(categories=[32, 64, 128, 256, 512],   name="convFilterN");
-    denseLayerN  = Integer(low=1,    high=5,                         name="denseLayerN");
+    denseLayerN  = Integer(low=1,    high=10,                        name="denseLayerN");
     denseNeuronN = Integer(low=10,   high=500,                       name="denseNeuronN");
-    actFunc  = Categorical(categories=["elu", "selu"],               name="actFunc");
+    actFunc  = Categorical(categories=["relu", "elu", "selu"],       name="actFunc");
     initFunc = Categorical(categories=["he_normal", "he_uniform"],   name="initFunc");
-    par0 = [1E-3,        3,         256,        3,          128,        "elu",   "he_normal"];
-    dims = [learningRate,convLayerN,convFilterN,denseLayerN,denseNeuronN,actFunc,initFunc];
-    #train optimal model
-    learningEpochNOpt     = 20;
-    dropoutMonteCarloNOpt = 30;
-#####dataset##################################################################################
+
+    modelName = "modelDense";
+    actFunc = Categorical(categories=["relu", "sigmoid"],            name="actFunc")
+    dims = [learningRate, denseLayerN, denseNeuronN, actFunc];
+    par0 = [1E-3,         3,           128,          "elu"];
+    
+    #modelName = "modelStandard";
+    #dims = [learningRate, denseLayerN, denseNeuronN, actFunc, initFunc];
+    #par0 = [1E-3,         3,           128,          "elu",   "he_normal"];
+    
+    #modelName = "modelConv2D";
+    #denseLayerN  = Integer(low=1,    high=5,                         name="denseLayerN");
+    #dims = [learningRate,convLayerN,convFilterN,denseLayerN,denseNeuronN,actFunc,initFunc];
+    #par0 = [1E-3,        3,         256,        3,          128,        "elu",   "he_normal"];
+    
+    #modelName = "modelRNN";
+    #dims = [learningRate];
+    #par0 = [1E-3];
+
+#####dataset###################################################################################
     fashionData = tf.keras.datasets.fashion_mnist;
     [[inputXFull, inputYFull], [testX, testY]] = fashionData.load_data();
     nameY = ["T-shirt", "Trouser", "Pullover", "Dress", "Coat",\
              "Sandal", "Shirt", "Sneaker", "Bag", "Boot"];
     #simulate unlabeled Y's
+    np.random.seed(1);
     inputY = [];
     for y in inputYFull:
         if np.random.uniform() < dropRate:
@@ -76,7 +98,7 @@ def main():
     inputXNorm = inputXNorm.reshape(inputXNorm.shape[0], *inputShape);
     testXNorm  = testXNorm .reshape(testXNorm .shape[0], *inputShape);
     #raw figures
-    if runTraining == True:
+    if trainOn == True:
         for idx, valX in enumerate(inputXFull[:printFigN]):
             print(idx, nameY[inputYFull[idx]]);
             plt.imshow(valX, cmap=plt.cm.binary);
@@ -85,10 +107,15 @@ def main():
             plt.savefig(filenameFig, dpi=100);
             plt.close();
             print("   ", filenameFig);
-#####autoencoder##############################################################################
+#####autoencoder###############################################################################
+    if trainOn == False:
+        trainAutoencoderOn = False;
+        optModelSearchOn   = False;
+        retrainOptModelOn  = False;    
+
     pretrainedLayers = []
-    if (runTraining == True) and (autoEpochN > 0):
-        print("#####################################################AUTOENCODER PRETRAINING");
+    if trainAutoencoderOn == True:
+        print("######################################################AUTOENCODER PRETRAINING");
         encodedXuntrained = None;
         trainX, validX, trainY, validY = train_test_split(inputXNorm, inputY, test_size=0.1,\
                                                           shuffle=False);
@@ -142,11 +169,11 @@ def main():
             if isinstance(layer, tf.keras.layers.Conv2D):
                 #layer.trainable = False;
                 pretrainedLayers.append(layer);
-#####searching for optimal model##############################################################
+#####searching for optimal model###############################################################
     inputXNorm, inputY = dropNaNY(inputXNorm, inputY);  #dropping out untagged events
-    if (runTraining == True) and (optimizationCallN > 0):
+    if optModelSearchOn == True:
         print("#################################################SEARCHING FOR OPTIMAL MODEL");
-        fitFunc = fitFuncLambda(dims, targetN, inputShape, inputXNorm, inputY, \
+        fitFunc = fitFuncLambda(modelName, dims, targetN, inputShape, inputXNorm, inputY, \
                                 validationRatio, learningEpochN, dropoutMonteCarloN,\
                                 pretrainedLayers=pretrainedLayers);
         checkpointPath = EXEPATH + "/" + MODELNAME + "/checkpoint.pkl";
@@ -172,12 +199,11 @@ def main():
         except:
             raise;
         #main optimization
-        if (runTraining == True) and (optimizationCallN > 0):
-            result=gp_minimize(func=fitFunc, dimensions=dims,x0=par0,y0=eval0, acq_func="EI",\
-                               n_calls=optimizationCallN, callback=[checkpointSaver]);
-#####retrain optimal model####################################################################
-    if runTraining == True:
-        print("#######################################################RETRAIN OPTIMAL MODEL");
+        result=gp_minimize(func=fitFunc, dimensions=dims,x0=par0,y0=eval0, acq_func="EI",\
+                           n_calls=optimizationCallN, callback=[checkpointSaver]);
+#####retrain optimal model#####################################################################
+    if retrainOptModelOn == True:
+        print("########################################################RETRAIN OPTIMAL MODEL");
         parOpt = [];
         try:
             optParDict = {};
@@ -192,11 +218,11 @@ def main():
             print("Using par0 as the optimized parameters");
         except:
             raise;
-        fitFuncOpt = fitFuncLambda(dims, targetN, inputShape, inputXNorm, inputY,\
+        fitFuncOpt = fitFuncLambda(modelName, dims, targetN, inputShape, inputXNorm, inputY,\
                                    validationRatio, learningEpochNOpt, dropoutMonteCarloNOpt,\
                                    pretrainedLayers=pretrainedLayers);
         optAccuracy = fitFuncOpt(parOpt);
-####prediction################################################################################
+####prediction#################################################################################
     #loading trained data
     try:
         model = tf.keras.models.load_model(MODELNAME);
@@ -236,12 +262,72 @@ def main():
 
 
 
-##############################################################################################
-##############################################################################################
-##############################################################################################
-#model########################################################################################
-def buildModel(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLayers=[]):
-    #dims = [learningRate,convLayerN,convFilterN,denseLayerN,denseNeuronN,actFunc,initFunc];
+###############################################################################################
+###############################################################################################
+###############################################################################################
+#model#########################################################################################
+def buildModel(modelName, pars, dims, targetN,inputShape, dropoutMCSeed=0,pretrainedLayers=[]):
+    if modelName == "modelDense":
+        return modelDense(pars, dims, targetN, inputShape, dropoutMCSeed, pretrainedLayers);
+    elif modelName == "modelStandard":
+        return modelStandard(pars, dims, targetN, inputShape, dropoutMCSeed, pretrainedLayers);
+    elif modelName == "modelConv2D":
+        return modelConv2D(pars, dims, targetN, inputShape, dropoutMCSeed, pretrainedLayers);
+    elif modelName == "modelRNN":
+        return modelRNN(pars, dims, targetN, inputShape, dropoutMCSeed, pretrainedLayers);
+    else:
+        print("No model found:\n    ", modelName);
+        sys.exit(0);
+def modelDense(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLayers=[]):
+    #dims: learningRate, denseLayerN, denseNeuronN, actFunc
+    parDict = {};
+    for par, dim in zip(pars, dims):
+        parDict[dim.name] = par;
+
+    model = tf.keras.models.Sequential();
+    if not pretrainedLayers:
+        model.add(tf.keras.layers.Flatten(input_shape=inputShape));
+    else:
+        for layer in pretrainedLayers:
+            model.add(cloneLayer(layer));
+    for i in range(parDict["denseLayerN"]):
+        model.add(tf.keras.layers.Dense(parDict["denseNeuronN"],\
+                                        activation=parDict["actFunc"]));
+    model.add(tf.keras.layers.Dense(targetN, activation="softmax"));
+    model.compile(optimizer=tf.keras.optimizers.SGD(lr=parDict["learningRate"]),\
+                  loss=tf.keras.losses.sparse_categorical_crossentropy, metrics=["accuracy"]);
+    return model;
+def modelStandard(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLayers=[]):
+    #dims: learningRate, denseLayerN, denseNeuronN, actFunc, initFunc
+    #############Adjustables#############
+    dropoutRate   = 0.2;
+    momentumRatio = 0.9;
+    #####################################
+    parDict = {};
+    for par, dim in zip(pars, dims):
+        parDict[dim.name] = par;    
+
+    model = tf.keras.models.Sequential();
+    if not pretrainedLayers:
+        model.add(tf.keras.layers.Flatten(input_shape=inputShape));
+    else:
+        for layer in pretrainedLayers:
+            model.add(cloneLayer(layer));
+    for i in range(parDict["denseLayerN"]):
+        model.add(tf.keras.layers.Dense(parDict["denseNeuronN"],activation=parDict["actFunc"],\
+                                        kernel_initializer=parDict["initFunc"]));
+        model.add(dropoutMC(rate=dropoutRate, seed=dropoutMCSeed));
+        model.add(tf.keras.layers.BatchNormalization());
+        model.add(tf.keras.layers.Dense(parDict["denseNeuronN"],activation=parDict["actFunc"],\
+                                        kernel_initializer=parDict["initFunc"]));
+    model.add(tf.keras.layers.Dense(targetN, activation="softmax"));
+    optimizer = tf.keras.optimizers.SGD(lr=parDict["learningRate"], momentum=momentumRatio,\
+                                        nesterov=True);
+    model.compile(optimizer=optimizer,\
+                  loss=tf.keras.losses.sparse_categorical_crossentropy, metrics=["accuracy"]);
+    return model;
+def modelConv2D(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLayers=[]):
+    #dims: learningRate, convLayerN, convFilterN, denseLayerN, denseNeuronN, actFunc, initFunc
     #############Adjustables#############
     convLayerNinit  = 64;
     convFilterNinit = (8, 8);
@@ -251,6 +337,7 @@ def buildModel(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLayer
     parDict = {};
     for par, dim in zip(pars, dims):
         parDict[dim.name] = par;
+
     model = tf.keras.models.Sequential();
     if not pretrainedLayers:
         model.add(tf.keras.layers.Conv2D(convLayerNinit, convFilterNinit, 
@@ -272,17 +359,55 @@ def buildModel(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLayer
         model.add(tf.keras.layers.Dense(neutronN, activation=parDict["actFunc"],\
                                         kernel_initializer=parDict["initFunc"]));
     model.add(tf.keras.layers.Dense(targetN, activation="softmax"));
-    optimizer = tf.keras.optimizers.SGD(lr=parDict["learningRate"],\
-                                        momentum=momentumRatio, nesterov=True);
+    optimizer = tf.keras.optimizers.SGD(lr=parDict["learningRate"], momentum=momentumRatio,\
+                                        nesterov=True);
     model.compile(optimizer=optimizer,\
-                  loss=tf.keras.losses.sparse_categorical_crossentropy,\
-                  metrics=["accuracy"]);
+                  loss=tf.keras.losses.sparse_categorical_crossentropy, metrics=["accuracy"]);
     return model;
-class dropoutMC(tf.keras.layers.Dropout):
-    def call(self, inputs):
-        return super().call(inputs, training=True); #to be turned off during .evaluation()
 #https://machinelearningmastery.com/how-to-implement-major-architecture-innovations-for-
 #convolutional-neural-networks/
+def modelRNN(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLayers=[]):
+    #dims: learningRate
+    #############Adjustables#############
+    convLayerNinit  = 64;
+    convFilterNinit = (8, 8);
+    dropoutRate     = 0.5;
+    momentumRatio   = 0.9;
+    deepLayers      = [64]*3 + [128]*4 + [256]*6 + [512]*3;
+    #####################################
+    parDict = {};
+    for par, dim in zip(pars, dims):
+        parDict[dim.name] = par;
+
+    inputZ = tf.keras.layers.Input(inputShape);
+    Z = inputZ + 0;
+    if not pretrainedLayers:
+        Z = tf.keras.layers.Conv2D(convLayerNinit, convFilterNinit, strides=2,\
+                                   activation="relu", padding="SAME")(Z);
+    else:
+        for layer in pretrainedLayers:
+            Z = layer(Z);
+    Z = tf.keras.layers.BatchNormalization()(Z);
+    Z = tf.keras.layers.Activation("relu")(Z);
+    Z = tf.keras.layers.MaxPool2D(pool_size=(3, 3), strides=2, padding="SAME")(Z);
+    
+    filterNpre = 64
+    for filterN in deepLayers:
+        strideN = (1 if filterN == filterNpre else 2);
+        Z = residualBlock(Z, filterN, strideN=strideN);
+        filterNpre = filterN*1;
+    
+    Z = tf.keras.layers.GlobalAvgPool2D()(Z);
+    Z = tf.keras.layers.Flatten()(Z);
+    Z = tf.keras.layers.Dropout(rate=dropoutRate, seed=dropoutMCSeed)(Z);
+    Z = tf.keras.layers.Dense(64, activation="relu", kernel_initializer="he_normal")(Z);
+    Z = tf.keras.layers.Dense(targetN, activation="softmax")(Z);
+    model = tf.keras.models.Model(inputs=inputZ, outputs=Z);
+    optimizer = tf.keras.optimizers.SGD(lr=parDict["learningRate"], momentum=momentumRatio,\
+                                        nesterov=True);
+    model.compile(optimizer=optimizer,\
+                  loss=tf.keras.losses.sparse_categorical_crossentropy, metrics=["accuracy"]);
+    return model;
 def residualBlock(inputZ, filterN, strideN=1):
     mainZ = inputZ + 0;
     mainZ = tf.keras.layers.Conv2D(filterN, [3, 3], strides=strideN, padding="SAME",\
@@ -302,8 +427,11 @@ def residualBlock(inputZ, filterN, strideN=1):
     mergedZ = tf.keras.layers.add([mainZ, skipZ]);
     mergedZ = tf.keras.layers.Activation("relu")(mergedZ);
     return mergedZ;
-#model fitter#################################################################################
-def fitFuncGen(pars, dims, targetN, inputShape, inputX, inputY,\
+class dropoutMC(tf.keras.layers.Dropout):
+    def call(self, inputs):
+        return super().call(inputs, training=True); #to be turned off during .evaluation()
+#model fitter##################################################################################
+def fitFuncGen(modelName, pars, dims, targetN, inputShape, inputX, inputY,\
                valiR, epochN, dropMCN, pretrainedLayers=[]):
     #############Adjustables#############
     minLearningRate       = pow(10, -6);
@@ -335,7 +463,7 @@ def fitFuncGen(pars, dims, targetN, inputShape, inputX, inputY,\
     accuracies = [];
     for dropSeed in range(dropMCN):
         print("\n###################################MONTE CARLO DROPOUT:", dropSeed);
-        model=buildModel(pars, dims, targetN, inputShape,\
+        model=buildModel(modelName, pars, dims, targetN, inputShape,\
                          dropoutMCSeed=dropSeed, pretrainedLayers=pretrainedLayers);
         history = model.fit(trainX, trainY, validation_data=(validX, validY),\
                             epochs=epochN, callbacks=callbacks);
@@ -373,15 +501,15 @@ def fitFuncGen(pars, dims, targetN, inputShape, inputX, inputY,\
               tensorboardModelDir.replace("tensorboardModelDir/", "tensorboardModelDir/Fin"));
     OPTITER += 1;
     return -accuracy;
-def fitFuncLambda(dims, targetN, inputShape, trainX, trainY, valiR, epochN, dropMCN,\
-                  pretrainedLayers=[]):
-    return lambda pars : fitFuncGen(pars, dims, targetN, inputShape, trainX, trainY,\
+def fitFuncLambda(modelName, dims, targetN, inputShape, trainX, trainY,\
+                  valiR, epochN, dropMCN, pretrainedLayers=[]):
+    return lambda pars : fitFuncGen(modelName, pars, dims, targetN, inputShape,trainX,trainY,\
                                     valiR, epochN, dropMCN, pretrainedLayers=[]);
 def learningRateFunc(epoch, initLR, minLR, decayC):
     return initLR*pow(0.1, 1.0*epoch/decayC) + minLR;
 def schedulerLambda(initLR, minLR, decayC):
     return lambda epoch : learningRateFunc(epoch, initLR, minLR, decayC);
-#autoencoder##################################################################################
+#autoencoder###################################################################################
 def buildAutoEncoder(encoder, decoder):
     model = tf.keras.models.Sequential([encoder, decoder]);
     model.compile(optimizer=tf.keras.optimizers.SGD(lr=1.0), loss="binary_crossentropy",\
@@ -448,7 +576,7 @@ def printTSNE(encodedXInput, knownYInput, nameY, figName):
     plt.savefig(filenameFig, dpi=100);
     plt.close();
     print("   ", filenameFig);
-#helper funcs#################################################################################
+#helper funcs##################################################################################
 def stand2dArray(array):    #following tf.image.per_image_standardization
     array = np.array(array);
     flatArr = array.flatten();
