@@ -34,9 +34,8 @@ This final result of ResNet is not quite satisfactory; it's likely causes by a m
 &ensp;&ensp; Without pretraining: loss: 0.4145 - accuracy: 0.8487  
 
 210611: loss: 0.3919 - accuracy: 0.8827 (ResNet-34, pg478)<br/>
-&ensp;&ensp; Applies the residual neural network with a residualBlock() function + autoencoder
-&ensp;&ensp; Not using the full power, only
+&ensp;&ensp; Applies the residual neural network with a residualBlock() function following the autoencoder<br/>
+&ensp;&ensp; Not using the full power; it already requires GPU from colab with only ~300 samples with just the following:
 
             for filterN in [64] + [128] + [256] + [512]:
 
-However, it already requires GPU from colab with only ~300 samples.
