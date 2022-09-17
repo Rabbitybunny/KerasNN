@@ -180,7 +180,7 @@ def main():
         fitFunc = fitFuncLambda(modelName, dims, targetN, inputShape, inputXNorm, inputY, \
                                 validationRatio, learningEpochN, dropoutMonteCarloN,\
                                 pretrainedLayers=pretrainedLayers)
-        checkpointPath = EXE_LOC + "/" + modelName + "/checkpoint.pickle"
+        checkpointPath = EXE_LOC + "/" + modelName + "/checkpoint.pkl"
         checkpointSaver = CheckpointSaver(checkpointPath, compress=9, store_objective=False)
         eval0 = None
         #restore gp_minimize: remember to delete the .pkl file when changing model
