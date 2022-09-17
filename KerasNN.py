@@ -180,7 +180,7 @@ def main():
         fitFunc = fitFuncLambda(modelName, dims, targetN, inputShape, inputXNorm, inputY, \
                                 validationRatio, learningEpochN, dropoutMonteCarloN,\
                                 pretrainedLayers=pretrainedLayers)
-        checkpointPath = EXE_LOC + "/" + modelName + "/checkpoint.pickle"
+        checkpointPath = EXE_LOC + "/" + modelName + "/checkpoint.pkl"
         checkpointSaver = CheckpointSaver(checkpointPath, compress=9, store_objective=False)
         eval0 = None
         #restore gp_minimize: remember to delete the .pkl file when changing model
@@ -289,12 +289,12 @@ def modelDenseSimple(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     for par, dim in zip(pars, dims): parDict[dim.name] = par
     
     model = tf.keras.models.Sequential()
-    if not pretrainedLayers: model.add(tf.keras.layers.Flatten(input_shape=inputShape))
-    else:
-        for layer in pretrainedLayers: model.add(cloneLayer(layer))
+    for layer in pretrainedLayers: model.add(cloneLayer(layer))
+    if pretrainedLayers == []: model.add(tf.keras.layers.Flatten(input_shape=inputShape))
+
     model.add(tf.keras.layers.Dense(parDict["denseNeuronN"],  activation="relu"))
     model.add(tf.keras.layers.Dense(parDict["denseNeuronN2"], activation="relu"))
-    model.add(tf.keras.layers.Dense(targetN,       activation="softmax"))
+    model.add(tf.keras.layers.Dense(targetN,                  activation="softmax"))
     model.compile(optimizer=tf.keras.optimizers.SGD(lr=parDict["learningRate"]),\
                   loss=tf.keras.losses.sparse_categorical_crossentropy,metrics=["accuracy"])
     return model
@@ -304,9 +304,9 @@ def modelDense(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     for par, dim in zip(pars, dims): parDict[dim.name] = par
 
     model = tf.keras.models.Sequential()
-    if not pretrainedLayers: model.add(tf.keras.layers.Flatten(input_shape=inputShape))
-    else:
-        for layer in pretrainedLayers: model.add(cloneLayer(layer))
+    for layer in pretrainedLayers: model.add(cloneLayer(layer))
+    if pretrainedLayers == []: model.add(tf.keras.layers.Flatten(input_shape=inputShape))
+
     for i in range(parDict["denseLayerN"]):
         model.add(tf.keras.layers.Dense(parDict["denseNeuronN"], activation=parDict["actFunc"]))
     model.add(tf.keras.layers.Dense(targetN, activation="softmax"))
@@ -323,9 +323,9 @@ def modelStandard(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLa
     for par, dim in zip(pars, dims): parDict[dim.name] = par
 
     model = tf.keras.models.Sequential()
-    if not pretrainedLayers: model.add(tf.keras.layers.Flatten(input_shape=inputShape))
-    else:
-        for layer in pretrainedLayers: model.add(cloneLayer(layer))
+    for layer in pretrainedLayers: model.add(cloneLayer(layer))
+    if pretrainedLayers == []: model.add(tf.keras.layers.Flatten(input_shape=inputShape))
+
     for i in range(parDict["denseLayerN"]):
         model.add(tf.keras.layers.Dense(parDict["denseNeuronN"],activation=parDict["actFunc"],\
                                         kernel_initializer=parDict["initFunc"]))
@@ -351,12 +351,12 @@ def modelConv2D(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLaye
     for par, dim in zip(pars, dims): parDict[dim.name] = par
 
     model = tf.keras.models.Sequential()
-    if not pretrainedLayers:
+    for layer in pretrainedLayers: model.add(cloneLayer(layer))
+    if pretrainedLayers == []:
         model.add(tf.keras.layers.Conv2D(convLayerNinit, convFilterNinit, 
                                          activation=parDict["actFunc"],\
                                          padding="SAME", input_shape=inputShape))
-    else:
-        for layer in pretrainedLayers: model.add(cloneLayer(layer))
+
     for i in range(parDict["convLayerN"]):
         if pow(2, i+1) < min(inputShape[0], inputShape[1]): 
             model.add(tf.keras.layers.MaxPool2D(pool_size=(2, 2)))
@@ -391,11 +391,10 @@ def modelRNN(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLayers=
 
     inputZ = tf.keras.layers.Input(inputShape)
     Z = inputZ + 0
-    if not pretrainedLayers:
+    for layer in pretrainedLayers: Z = layer(Z)
+    if pretrainedLayers == []:
         Z = tf.keras.layers.Conv2D(convLayerNinit, convFilterNinit, strides=2,\
                                    activation="relu", padding="SAME")(Z)
-    else:
-        for layer in pretrainedLayers: Z = layer(Z)
     Z = tf.keras.layers.BatchNormalization()(Z)
     Z = tf.keras.layers.Activation("relu")(Z)
     Z = tf.keras.layers.MaxPool2D(pool_size=(3, 3), strides=2, padding="SAME")(Z)
