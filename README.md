@@ -39,6 +39,9 @@ This final result of ResNet is not quite satisfactory; it's likely causes by a m
 
 220917: combined code with all the model implemented in the previous codes
 
+## Extra Notes:
+- the standardization so far has been done for each 2d sample figure independently. For input with much lower dimension and much large ranges, it's probably best to get an over all mean and std among all the sample entries. If this is the case, then the test sample must be standardized using the mean and std derived from the training samples.
+
 ## References:
 - A. Géron, Hands-On Machine Learning with Scikit-Learn, Keras, and TensorFlow: Concepts, Tools, and Techniques to Build Intelligent Systems 2nd Edition (2019) (<a href="https://www.amazon.com/Hands-Machine-Learning-Scikit-Learn-TensorFlow/dp/1492032646">Amazon</a>)
 - J. Brownlee, machinelearningmastery (<a href="https://machinelearningmastery.com/">webpage</a>). Can almost goolge anything about machine learning with the key word
