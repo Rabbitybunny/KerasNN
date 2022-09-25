@@ -29,9 +29,9 @@ pathlib.Path(FIG_LOC).mkdir(exist_ok=True);
 
 
 def main():
-    verbosity = 1
+    verbosity = 2
 
-    modelName = "mnistFashionResNet50.model"
+    modelName = "mnistFashionDense.model"
     trainOn   = True               #False to test the currently saved model
     printRawFigN  = 10
     printPredFigN = 10
@@ -224,6 +224,9 @@ def main():
                 optParDict = pickle.load(handle)
             OPTACCU = optParDict["accuracy"]
             OPTASTD = optParDict["accuSTD"]
+            if verbosity >= 2:
+                model = tf.keras.models.load_model(modelName)
+                print(model.summary())
             print("Current optimal accuracy:")
             print("   ", OPTACCU, "+/-", (OPTASTD if (OPTASTD > 0) else "NA"))
         except FileNotFoundError:
@@ -255,6 +258,8 @@ def main():
                                    pretrainedLayers=pretrainedLayers, verbosity=verbosity)
         optAccuracy = fitFuncOpt(parOpt)
 ####prediction##################################################################################
+    if verbosity >= 1:
+        print("###############################################################MODEL PREDICTION")
     #loading trained data
     try:
         model = tf.keras.models.load_model(modelName)
@@ -262,6 +267,7 @@ def main():
         optParDict = {}
         with open(modelName + "/pars.pickle", "rb") as handle:
             optParDict = pickle.load(handle)
+        if verbosity >= 2: print(model.summary())
     except OSError or FileNotFoundError:
         print("No trained model is found:\n    ", modelName)
         sys.exit(0)
@@ -472,6 +478,7 @@ def residualBlock(inputZ, filterN, strideN=1):
     mergedZ = tf.keras.layers.Activation("relu")(mergedZ)
     return mergedZ
 #https://stackoverflow.com/questions/49492255
+#also include method on how to inject layers in existing model
 def modelResNet50(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLayers=[]):
     #dims: learningRate
     #############Adjustables#############
@@ -485,6 +492,8 @@ def modelResNet50(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLa
     #-------------------------------------------------------------------------
     #doesn't quite work: expected shape=(None, 224, 224, 3)
     model = ResNet50(weights="imagenet")
+
+    print(model.summary())
     #-------------------------------------------------------------------------
     optimizer = tf.keras.optimizers.SGD(lr=parDict["learningRate"], momentum=momentumRatio,\
                                         nesterov=True)
