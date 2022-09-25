@@ -88,6 +88,7 @@ def main():
     elif "ResNet50" in modelName:
         dims = [learningRate]
         par0 = [1E-3]
+    convDimRequired = ("Conv2D" in modelName) or ("RNN" in modelName) or ("ResNet" in modelName)
     if verbosity >= 1:
         print("#####################################################################RUN STARTS")
         print("Loading dataset parameters:")
@@ -123,7 +124,6 @@ def main():
     targetN    = len(nameY)
     inputShape = [inputXNorm.shape[1], inputXNorm.shape[2]]
     #data dim requirement
-    convDimRequired = ("Conv2D" in modelName) or ("RNN" in modelName) or ("ResNet" in modelName)
     if convDimRequired:
         inputShape = [inputXNorm.shape[1], inputXNorm.shape[2], 1]     #note: needed for conv2D
         inputXNorm = inputXNorm.reshape(inputXNorm.shape[0], *inputShape)
@@ -536,18 +536,19 @@ def fitFuncGen(modelName, pars, dims, targetN, inputShape, inputX, inputY,\
     trainX, validX, trainY, validY = train_test_split(inputX, inputY, test_size=valiR)
     accuracies = []
     for dropSeed in range(dropMCN):
-        if verbosity >= 1:
-            print("\n##############################MONTE CARLO DROPOUT:", dropSeed)
+        if verbosity >= 1: print("\n############################MONTE CARLO DROPOUT:", dropSeed)
         model=buildModel(modelName, pars, dims, targetN, inputShape,\
                          dropoutMCSeed=dropSeed, pretrainedLayers=pretrainedLayers)
+        if verbosity >= 3: print(model.summary())
         history = model.fit(trainX, trainY, validation_data=(validX, validY),\
                             epochs=epochN, callbacks=callbacks)
         accuracies.append(history.history["val_accuracy"][-1])
-        print("Drop-Seed", dropSeed, "Accuracy =", accuracies[dropSeed])
+        if verbosity >= 1: print("Drop-Seed", dropSeed, "Accuracy =", accuracies[dropSeed])
         if accuracies[dropSeed] < (OPTACCU - 6*OPTASTD):
-            print("The accuracy is 6-sigma smaller than the current optimal accuracy:")
-            print("   ", OPTACCU, "-", "6*" +str(OPTASTD))
-            print("Terminating the dropout Monte Carlo...\n")
+            if verbosity >= 1: 
+                print("The accuracy is 6-sigma smaller than the current optimal accuracy:")
+                print("   ", OPTACCU, "-", "6*" +str(OPTASTD))
+                print("Terminating the dropout Monte Carlo...\n")
             break
     accuracy = sum(accuracies)/len(accuracies)
     accuSTD = -1
