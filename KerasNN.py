@@ -29,10 +29,12 @@ pathlib.Path(FIG_LOC).mkdir(exist_ok=True);
 
 
 def main():
-    modelName = "mnistFashionSimpleDense.model"
-    trainOn   = True
-    printFigN = 10
-    
+    verbosity = 1
+
+    modelName = "mnistFashionDense.model"
+    trainOn   = False               #False to test the currently saved model
+    printRawFigN  = 10
+    printPredFigN = 10
     #dataset 
     testRatio       = 0.1
     dropRatio       = 0.0          #ratio of data to simulate unlabeled Y's
@@ -83,6 +85,25 @@ def main():
     elif "RNN" in modelName:
         dims = [learningRate]
         par0 = [1E-3]
+    if verbosity >= 1:
+        print("#####################################################################RUN STARTS")
+        print("Loading dataset parameters:")
+        print("  trainOn      :", trainOn)
+        print("  printRawFigN :", printRawFigN)
+        print("  printPredFigN:", printPredFigN)
+        print("  testRatio      :", testRatio)
+        print("  dropRatio      :", dropRatio)
+        print("  validationRatio:", validationRatio)
+        print("Loading training parameters:")
+        print("  trainAutoencoderOn:", trainAutoencoderOn)
+        print("  autoEpochN        :", autoEpochN)
+        print("  optModelSearchOn   :", optModelSearchOn)
+        print("  optimizationCallN  :", optimizationCallN)
+        print("  learningEpochN     :", learningEpochN )
+        print("  dropoutMonteCarloN: ", dropoutMonteCarloN)
+        print("  retrainOptModelOn    :", retrainOptModelOn)
+        print("  learningEpochNOpt    :", learningEpochNOpt)
+        print("  dropoutMonteCarloNOpt:", dropoutMonteCarloNOpt)
 #####dataset####################################################################################
     fashionData = tf.keras.datasets.fashion_mnist
     [[inputXFull, inputYFull], [testX, testY]] = fashionData.load_data()#no need for testRatio
@@ -96,23 +117,23 @@ def main():
         else:                               inputY.append(y)
     #data normalization/standardization
     inputXNorm = np.array([stand2dArray(X) for X in inputXFull])
-    testXNorm  = np.array([stand2dArray(X) for X in testX])
     targetN    = len(nameY)
     inputShape = [inputXNorm.shape[1], inputXNorm.shape[2]]
     if ("Conv2D" in modelName) or ("RNN" in modelName):
         inputShape = [inputXNorm.shape[1], inputXNorm.shape[2], 1]     #note: needed for conv2D
         inputXNorm = inputXNorm.reshape(inputXNorm.shape[0], *inputShape)
-        testXNorm  = testXNorm .reshape(testXNorm .shape[0], *inputShape)
     #raw figures
-    if trainOn == True:
-        for idx, valX in enumerate(inputXFull[:printFigN]):
-            print(idx, nameY[inputYFull[idx]])
+    if printRawFigN > 0:
+        if verbosity >= 1: print("Saveing sample figures:")
+        for idx, valX in enumerate(inputXFull[:printRawFigN]):
             plt.imshow(valX, cmap=plt.cm.binary)
             plt.title(nameY[inputYFull[idx]], fontsize=24)
             filenameFig = FIG_LOC + "raw"+str(idx)+".png"
             plt.savefig(filenameFig, dpi=100)
             plt.close()
-            print("   ", filenameFig)
+            if verbosity >= 1:
+                print(" ", idx, nameY[inputYFull[idx]])
+                print("   ", filenameFig)
 #####autoencoder################################################################################
     if trainOn == False:
         trainAutoencoderOn = False
@@ -120,7 +141,8 @@ def main():
         retrainOptModelOn  = False    
     pretrainedLayers = []
     if trainAutoencoderOn == True:
-        print("########################################################AUTOENCODER PRETRAINING")
+        if verbosity >= 1:
+            print("####################################################AUTOENCODER PRETRAINING")
         encodedXuntrained = None
         trainX, validX, trainY, validY = train_test_split(inputXNorm, inputY, test_size=0.1,\
                                                           shuffle=False)
@@ -152,8 +174,8 @@ def main():
             cmprsX   = autoEncoder.predict(validX)
             validX = validX.reshape(*validX.shape[:-1])
             cmprsX = cmprsX.reshape(*cmprsX.shape[:-1])
-            printTSNE(encodedXuntrained, validY, nameY, "TSNEuntrained")
-            printTSNE(encodedX,          validY, nameY, "TSNE")
+            printTSNE(encodedXuntrained, validY, nameY, "TSNEuntrained", verbosity=verbosity)
+            printTSNE(encodedX,          validY, nameY, "TSNE",          verbosity=verbosity)
             for idx, valX in enumerate(validX[:printFigN]):
                 fig = plt.figure(figsize=(12, 6))
                 gs = gridspec.GridSpec(1, 2)
@@ -176,10 +198,11 @@ def main():
 #####searching for optimal model################################################################
     inputXNorm, inputY = dropNaNY(inputXNorm, inputY)  #dropping out untagged events
     if optModelSearchOn == True:
-        print("####################################################SEARCHING FOR OPTIMAL MODEL")
+        if verbosity >= 1:
+            print("################################################SEARCHING FOR OPTIMAL MODEL")
         fitFunc = fitFuncLambda(modelName, dims, targetN, inputShape, inputXNorm, inputY, \
                                 validationRatio, learningEpochN, dropoutMonteCarloN,\
-                                pretrainedLayers=pretrainedLayers)
+                                pretrainedLayers=pretrainedLayers, verbosity=verbosity)
         checkpointPath = EXE_LOC + "/" + modelName + "/checkpoint.pkl"
         checkpointSaver = CheckpointSaver(checkpointPath, compress=9, store_objective=False)
         eval0 = None
@@ -207,7 +230,8 @@ def main():
                            n_calls=optimizationCallN, callback=[checkpointSaver])
 #####retrain optimal model######################################################################
     if retrainOptModelOn == True:
-        print("##########################################################RETRAIN OPTIMAL MODEL")
+        if verbosity >= 1:
+            print("######################################################RETRAIN OPTIMAL MODEL")
         parOpt = []
         try:
             optParDict = {}
@@ -223,7 +247,7 @@ def main():
             raise
         fitFuncOpt = fitFuncLambda(modelName, dims, targetN, inputShape, inputXNorm, inputY,\
                                    validationRatio, learningEpochNOpt, dropoutMonteCarloNOpt,\
-                                   pretrainedLayers=pretrainedLayers)
+                                   pretrainedLayers=pretrainedLayers, verbosity=verbosity)
         optAccuracy = fitFuncOpt(parOpt)
 ####prediction##################################################################################
     #loading trained data
@@ -238,6 +262,10 @@ def main():
         sys.exit(0)
     except:
         raise
+    #data normalization/standardization
+    testXNorm = np.array([stand2dArray(X) for X in testX])
+    if ("Conv2D" in modelName) or ("RNN" in modelName):
+        testXNorm = testXNorm.reshape(testXNorm.shape[0], *inputShape)
     #evaluation
     model.evaluate(x=testXNorm, y=testY)
     histDF.plot(figsize=(8, 5))
@@ -247,18 +275,20 @@ def main():
     filenameFig = FIG_LOC + "-optModel_learningHistory.png"
     plt.savefig(filenameFig)
     plt.close()
-    print("Saving the following figures:\n    ", filenameFig)
+    if verbosity >= 1: print("Saving training result/prediction figures:\n    ", filenameFig)
     #prediction figures
-    predValY = model.predict(testXNorm)
-    predY = np.argmax(predValY, axis=-1)
-    for idx, valX in enumerate(testX[:printFigN]):
-        print(idx, nameY[predY[idx]], nameY[testY[idx]])
-        plt.imshow(valX, cmap=plt.cm.binary)
-        plt.title("Prediction: "+nameY[predY[idx]], fontsize=24)
-        filenameFig = FIG_LOC + "predicted"+str(idx)+".png"
-        plt.savefig(filenameFig, dpi=100)
-        plt.close()
-        print("   ", filenameFig)
+    if printPredFigN > 0:
+        predValY = model.predict(testXNorm)
+        predY = np.argmax(predValY, axis=-1)
+        for idx, valX in enumerate(testX[:printPredFigN]):
+            plt.imshow(valX, cmap=plt.cm.binary)
+            plt.title("Prediction: "+nameY[predY[idx]], fontsize=24)
+            filenameFig = FIG_LOC + "predicted"+str(idx)+".png"
+            plt.savefig(filenameFig, dpi=100)
+            plt.close()
+            if verbosity >= 1:
+                print(" ", idx, nameY[predY[idx]], nameY[testY[idx]])
+                print("   ", filenameFig)
 
 
 
@@ -440,7 +470,7 @@ class dropoutMC(tf.keras.layers.Dropout):
         return super().call(inputs, training=True) #to be turned off during .evaluation()
 #model fitter###################################################################################
 def fitFuncGen(modelName, pars, dims, targetN, inputShape, inputX, inputY,\
-               valiR, epochN, dropMCN, pretrainedLayers=[]):
+               valiR, epochN, dropMCN, pretrainedLayers=[], verbosity=1):
     #############Adjustables#############
     minLearningRate       = pow(10, -6)
     scheduleExpDecayConst = 10
@@ -452,8 +482,9 @@ def fitFuncGen(modelName, pars, dims, targetN, inputShape, inputX, inputY,\
         parStr += str(par) + "-"
         parDict[dim.name] = par
     parStr = parStr[:-1]
-    print("#####################################################################BEGIN", OPTITER)
-    print("Parameters:", parStr)
+    if verbosity >= 1:
+        print("###################################################START MODEL FITTING", OPTITER)
+        print("Parameters:", parStr)
     callbacks = []
     tensorboardModelDir = EXE_LOC + "/" + modelName + "/tensorboardModelDir/"
     tensorboardModelDir += str(int(time.time())) + "--" + parStr
@@ -470,7 +501,8 @@ def fitFuncGen(modelName, pars, dims, targetN, inputShape, inputX, inputY,\
     trainX, validX, trainY, validY = train_test_split(inputX, inputY, test_size=valiR)
     accuracies = []
     for dropSeed in range(dropMCN):
-        print("\n###################################MONTE CARLO DROPOUT:", dropSeed)
+        if verbosity >= 1:
+            print("\n##############################MONTE CARLO DROPOUT:", dropSeed)
         model=buildModel(modelName, pars, dims, targetN, inputShape,\
                          dropoutMCSeed=dropSeed, pretrainedLayers=pretrainedLayers)
         history = model.fit(trainX, trainY, validation_data=(validX, validY),\
@@ -485,10 +517,11 @@ def fitFuncGen(modelName, pars, dims, targetN, inputShape, inputX, inputY,\
     accuracy = sum(accuracies)/len(accuracies)
     accuSTD = -1
     if len(accuracies) > 1: accuSTD = np.std(np.array(accuracies), ddof=1)
-    print("--------------------------------------------------------------RESULT:")
-    print("Parameters:           ", parStr)
-    print("Ending Learning Rate =", K.eval(model.optimizer.lr))
-    print("Model Accuracy       =", accuracy, "+/-", (accuSTD if (accuSTD > 0) else "NA"))
+    if verbosity >= 1:
+        print("--------------------------------------------------------------RESULT:")
+        print("Parameters:           ", parStr)
+        print("Ending Learning Rate =", K.eval(model.optimizer.lr))
+        print("Model Accuracy       =", accuracy, "+/-", (accuSTD if (accuSTD > 0) else "NA"))
     if accuracy > OPTACCU:
         OPTACCU = 1.0*accuracy
         OPTASTD = max(1.0*accuSTD, 0.0)
@@ -500,17 +533,19 @@ def fitFuncGen(modelName, pars, dims, targetN, inputShape, inputX, inputY,\
         histDF.to_pickle(modelName + "/history.pickle")
         with open(modelName + "/pars.pickle", "wb") as handle:
             pickle.dump(optParDict, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        print("Optimal So Far!")
-    print("############################################################################END\n\n")
+        if verbosity >= 1: print("Optimal So Far!")
+    if verbosity >= 1:
+        print("###################################################END MODEL FITTING\n\n")
     del model
     os.rename(tensorboardModelDir, \
               tensorboardModelDir.replace("tensorboardModelDir/", "tensorboardModelDir/Fin"))
     OPTITER += 1
     return -accuracy
 def fitFuncLambda(modelName, dims, targetN, inputShape, trainX, trainY,\
-                  valiR, epochN, dropMCN, pretrainedLayers=[]):
+                  valiR, epochN, dropMCN, pretrainedLayers=[], verbosity=1):
     return lambda pars: fitFuncGen(modelName, pars, dims, targetN, inputShape,trainX,trainY,\
-                                   valiR, epochN, dropMCN, pretrainedLayers=[])
+                                   valiR, epochN, dropMCN, pretrainedLayers=[],\
+                                   verbosity=verbosity)
 def learningRateFunc(epoch, initLR, minLR, decayC):
     return initLR*pow(0.1, 1.0*epoch/decayC) + minLR
 def schedulerLambda(initLR, minLR, decayC):
@@ -550,7 +585,7 @@ def buildDecoderConv(inputShape):
     model.add(tf.keras.layers.Conv2DTranspose(1,  (3, 3), strides=2, activation="sigmoid",\
                                               padding="SAME"))
     return model
-def printTSNE(encodedXInput, knownYInput, nameY, figName):
+def printTSNE(encodedXInput, knownYInput, nameY, figName, verbosity=1):
     if encodedXInput is None: return
     encodedX, knownY = dropNaNY(encodedXInput, knownYInput)
     tsne = TSNE()
@@ -578,14 +613,16 @@ def printTSNE(encodedXInput, knownYInput, nameY, figName):
     gs.tight_layout(fig)
     plt.savefig(filenameFig, dpi=100)
     plt.close()
-    print("   ", filenameFig)
+    if verbosity >= 1: print("   ", filenameFig)
 #helper funcs###################################################################################
-def stand2dArray(array):    #following tf.image.per_image_standardization
+def stand2dArray(array, mean=None, std=None):    #following tf.image.per_image_standardization
     array = np.array(array)
     flatArr = array.flatten()
-    mean = np.mean(flatArr)
-    std = np.std(flatArr)
+    if mean is None: mean = np.mean(flatArr)
+    if std is None:  std = np.std(flatArr)
     return (array - mean)/max(std, 1/math.sqrt(flatArr.size))
+def get2dMean(array): return np.mean(np.array(array).flatten())
+def get2dSTD(array):  return np.std( np.array(array).flatten())
 def cloneLayer(layer):
     config = layer.get_config()
     weights = layer.get_weights()
