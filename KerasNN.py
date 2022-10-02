@@ -48,6 +48,7 @@ def main():
     autoEpochN            = 30
     
     optModelSearchOn      = True
+    optimizationCoreN     = -1     #-1 to use all cores
     optimizationCallN     = 30
     learningEpochN        = 6
     dropoutMonteCarloN    = 10
@@ -242,7 +243,8 @@ def main():
             raise
         #main optimization
         result = gp_minimize(func=fitFunc, dimensions=dims,x0=par0,y0=eval0, acq_func="EI",\
-                             n_calls=optimizationCallN, callback=[checkpointSaver])
+                             n_jobs=optimizationCoreN, n_calls=optimizationCallN,\
+                             callback=[checkpointSaver])
 #####retrain optimal model######################################################################
     if retrainOptModelOn == True:
         if verbosity >= 1:
