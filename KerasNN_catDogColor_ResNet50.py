@@ -1,6 +1,12 @@
 import sys, os, pathlib, time, math
+import warnings
+def warning_on_one_line(message, category, filename, lineno, file=None, line=None):
+    return '%s:%s: %s: %s\n' % (filename, lineno, category.__name__, message)
+warnings.formatwarning = warning_on_one_line
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 import numpy as np
 import pandas as pd
+import cv2
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.ticker import FuncFormatter 
@@ -28,13 +34,14 @@ EXE_LOC = str(pathlib.Path().absolute())
 
 
 
-DATA_LOC = None
-FIG_LOC  = EXE_LOC + "/fashionFig/"
+DATA_LOC = EXE_LOC + "/catDogData/"
+FIG_LOC  = EXE_LOC + "/catDogFig/"
 pathlib.Path(FIG_LOC).mkdir(exist_ok=True)
 def main():
-    verbosity = 2
+    verbosity = 3
+    np.random.seed(1)
 
-    modelName = "mnistFashionDense.model"
+    modelName = "catDogResNet50.model"
     trainOn   = True               #False to test the currently saved model
     printRawFigN  = 10
     printPredFigN = 10
@@ -80,7 +87,7 @@ def main():
         par0 = [1E-3,         3,           128,          "relu"]
     elif "Standard" in modelName:
         dims = [learningRate, denseLayerN, denseNeuronN, actFunc, initFunc]
-        par0 = [1E-3,         3,           128,          "elu",   "he_normal"]
+        par0 = [1E-3,         3,           256,          "elu",   "he_normal"]
     elif "Conv2D" in modelName:
         denseLayerN  = Integer(low=1,    high=5,                         name="denseLayerN")
         dims=[learningRate,convLayerN,convFilterN,denseLayerN,denseNeuronN,actFunc,initFunc]
@@ -91,7 +98,7 @@ def main():
     elif "ResNet50" in modelName:
         dims = [learningRate]
         par0 = [1E-3]
-    convDimRequired = ("Conv2D" in modelName) or ("RNN" in modelName) or ("ResNet" in modelName)
+    convDimRequired = ("Conv2D" in modelName) or ("RNN" in modelName)
     if verbosity >= 1:
         print("#####################################################################RUN STARTS")
         print("Loading dataset parameters:")
@@ -112,16 +119,47 @@ def main():
         print("  learningEpochNOpt    :", learningEpochNOpt)
         print("  dropoutMonteCarloNOpt:", dropoutMonteCarloNOpt)
 #####dataset####################################################################################
-    fashionData = tf.keras.datasets.fashion_mnist
-    [[inputXFull, inputYFull], [testX, testY]] = fashionData.load_data()#no need for testRatio
-    nameY = ["T-shirt", "Trouser", "Pullover", "Dress", "Coat",\
-             "Sandal", "Shirt", "Sneaker", "Bag", "Boot"]
+    nameY = ["dog", "cat"]
+    imageResize = (224, 224)
+    inputXFull, inputYFull, testX, testY = [], [], [], []
+
+    if verbosity >= 1: print("Loading data:")
+    dataTrain, dataTest = [], []
+    for yIter, label in enumerate(nameY):
+        trainPath = DATA_LOC + label + "/"
+        for imgName in os.listdir(trainPath):
+            errorOccured, origImgFile, resizedImgFile = False, None, None
+            try:
+                #stackoverflow.com/questions/9131992
+                #github.com/ImageMagick/ImageMagick/discussions/2754, just remove the ~ files
+                origImgFile = cv2.imread(trainPath+"/"+imgName)#, cv2.IMREAD_GRAYSCALE)
+                resizedImgFile = cv2.resize(origImgFile, imageResize)
+            except Exception as e:
+                warnings.warn(str(e), Warning)
+                errorOccured = True
+            if errorOccured == False: dataTrain.append([resizedImgFile, yIter])
+        testPath = DATA_LOC + label + "/"
+        for imgName in os.listdir(testPath):
+            errorOccured, origImgFile, resizedImgFile = False, None, None
+            try:
+                origImgFile = cv2.imread(testPath+"/"+imgName, cv2.IMREAD_GRAYSCALE)
+                resizedImgFile = cv2.resize(origImgFile, imageResize)
+            except Exception as e:
+                warnings.warn(str(e), Warning)
+                errorOccured = True
+            if errorOccured == False: dataTest.append([resizedImgFile, yIter])
+    np.random.shuffle(dataTrain)
+    for X, Y in dataTrain:
+        inputXFull.append(X)
+        inputYFull.append(Y)
+    for X, Y in dataTest:
+        testX.append(X)
+        testY.append(Y)
 
 
 
     ############################################################################################
     #simulate unlabeled Y's
-    np.random.seed(1)
     inputY = []
     for y in inputYFull:
         if np.random.uniform() < dropRatio: inputY.append(float("NaN"))
@@ -498,6 +536,7 @@ def modelResNet50(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLa
     for par, dim in zip(pars, dims): parDict[dim.name] = par
     #NOTE: ResNet50 expects inputShape=(None, 224, 224, 3)
     model = ResNet50(weights="imagenet")
+    
     optimizer = tf.keras.optimizers.SGD(learning_rate=parDict["learningRate"],\
                                         momentum=momentumRatio, nesterov=True)
     model.compile(optimizer=optimizer,\
@@ -535,7 +574,7 @@ def fitFuncGen(modelName, pars, dims, targetN, inputShape, inputX, inputY,\
                                         scheduleExpDecayConst)
         scheduler = tf.keras.callbacks.LearningRateScheduler(schedulerFunc)
         callbacks.append(scheduler)
-
+    
     accuracies = []
     for dropSeed in range(dropMCN):
         if verbosity >= 1: print("\n############################MONTE CARLO DROPOUT:", dropSeed)

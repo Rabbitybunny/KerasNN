@@ -1,6 +1,12 @@
 import sys, os, pathlib, time, math
+import warnings
+def warning_on_one_line(message, category, filename, lineno, file=None, line=None):
+    return '%s:%s: %s: %s\n' % (filename, lineno, category.__name__, message)
+warnings.formatwarning = warning_on_one_line
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 import numpy as np
 import pandas as pd
+import cv2
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.ticker import FuncFormatter 
@@ -21,17 +27,21 @@ from skopt import gp_minimize
 from skopt.callbacks import CheckpointSaver
 from skopt import load as load_gp_minimize
 from skopt.space import Integer, Real, Categorical
-OPTITER, OPTACCU, OPTASTD = 0, 0, 0;
-EXE_LOC = str(pathlib.Path().absolute());
-FIG_LOC = EXE_LOC + "/fashionFig/";
-pathlib.Path(FIG_LOC).mkdir(exist_ok=True);
+OPTITER, OPTACCU, OPTASTD = 0, 0, 0
+EXE_LOC = str(pathlib.Path().absolute())
 
 
 
+
+
+DATA_LOC = EXE_LOC + "/catDogData/"
+FIG_LOC  = EXE_LOC + "/catDogFig/"
+pathlib.Path(FIG_LOC).mkdir(exist_ok=True)
 def main():
     verbosity = 2
+    np.random.seed(1)
 
-    modelName = "mnistFashionDense.model"
+    modelName = "catDogStandard.model"
     trainOn   = True               #False to test the currently saved model
     printRawFigN  = 10
     printPredFigN = 10
@@ -77,7 +87,7 @@ def main():
         par0 = [1E-3,         3,           128,          "relu"]
     elif "Standard" in modelName:
         dims = [learningRate, denseLayerN, denseNeuronN, actFunc, initFunc]
-        par0 = [1E-3,         3,           128,          "elu",   "he_normal"]
+        par0 = [1E-3,         3,           256,          "elu",   "he_normal"]
     elif "Conv2D" in modelName:
         denseLayerN  = Integer(low=1,    high=5,                         name="denseLayerN")
         dims=[learningRate,convLayerN,convFilterN,denseLayerN,denseNeuronN,actFunc,initFunc]
@@ -109,12 +119,47 @@ def main():
         print("  learningEpochNOpt    :", learningEpochNOpt)
         print("  dropoutMonteCarloNOpt:", dropoutMonteCarloNOpt)
 #####dataset####################################################################################
-    fashionData = tf.keras.datasets.fashion_mnist
-    [[inputXFull, inputYFull], [testX, testY]] = fashionData.load_data()#no need for testRatio
-    nameY = ["T-shirt", "Trouser", "Pullover", "Dress", "Coat",\
-             "Sandal", "Shirt", "Sneaker", "Bag", "Boot"]
+    nameY = ["dog", "cat"]
+    imageResize = (200, 200)
+    inputXFull, inputYFull, testX, testY = [], [], [], []
+
+    if verbosity >= 1: print("Loading data:")
+    dataTrain, dataTest = [], []
+    for yIter, label in enumerate(nameY):
+        trainPath = DATA_LOC + label + "/"
+        for imgName in os.listdir(trainPath):
+            errorOccured, origImgFile, resizedImgFile = False, None, None
+            try:
+                #stackoverflow.com/questions/9131992
+                #github.com/ImageMagick/ImageMagick/discussions/2754, just remove the ~ files
+                origImgFile = cv2.imread(trainPath+"/"+imgName, cv2.IMREAD_GRAYSCALE)
+                resizedImgFile = cv2.resize(origImgFile, imageResize)
+            except Exception as e:
+                warnings.warn(str(e), Warning)
+                errorOccured = True
+            if errorOccured == False: dataTrain.append([resizedImgFile, yIter])
+        testPath = DATA_LOC + label + "/"
+        for imgName in os.listdir(testPath):
+            errorOccured, origImgFile, resizedImgFile = False, None, None
+            try:
+                origImgFile = cv2.imread(testPath+"/"+imgName, cv2.IMREAD_GRAYSCALE)
+                resizedImgFile = cv2.resize(origImgFile, imageResize)
+            except Exception as e:
+                warnings.warn(str(e), Warning)
+                errorOccured = True
+            if errorOccured == False: dataTest.append([resizedImgFile, yIter])
+    np.random.shuffle(dataTrain)
+    for X, Y in dataTrain:
+        inputXFull.append(X)
+        inputYFull.append(Y)
+    for X, Y in dataTest:
+        testX.append(X)
+        testY.append(Y)
+
+
+
+    ############################################################################################
     #simulate unlabeled Y's
-    np.random.seed(1)
     inputY = []
     for y in inputYFull:
         if np.random.uniform() < dropRatio: inputY.append(float("NaN"))
@@ -129,7 +174,7 @@ def main():
         inputXNorm = inputXNorm.reshape(inputXNorm.shape[0], *inputShape)
     #raw figures
     if printRawFigN > 0:
-        if verbosity >= 1: print("Saveing sample figures:")
+        if verbosity >= 1: print("Saving sample figures:")
         for idx, valX in enumerate(inputXFull[:printRawFigN]):
             plt.imshow(valX, cmap=plt.cm.binary)
             plt.title(nameY[inputYFull[idx]], fontsize=24)
@@ -170,9 +215,9 @@ def main():
         os.rename(tensorboardAutoDir, tensorboardAutoDir.replace("tensorboardAutoDir/",\
                                                                  "tensorboardAutoDir/Fin"))
         #compressed figures   
-        encoder    = tf.keras.models.load_model(modelName+"/zEncoder.model",    compile=False)
-        decoder    = tf.keras.models.load_model(modelName+"/zDecoder.model",    compile=False)
-        autoEncoder= tf.keras.models.load_model(modelName+"/zAutoEncoder.model",compile=False)
+        encoder     = tf.keras.models.load_model(modelName+"/zEncoder.model",    compile=False)
+        decoder     = tf.keras.models.load_model(modelName+"/zDecoder.model",    compile=False)
+        autoEncoder = tf.keras.models.load_model(modelName+"/zAutoEncoder.model",compile=False)
         if printFigN > 0:
             print("Saving the following figures:")
             encodedX = encoder.predict(validX)
@@ -234,8 +279,8 @@ def main():
         except:
             raise
         #main optimization
-        result=gp_minimize(func=fitFunc, dimensions=dims,x0=par0,y0=eval0, acq_func="EI",\
-                           n_calls=optimizationCallN, callback=[checkpointSaver])
+        result = gp_minimize(func=fitFunc, dimensions=dims,x0=par0,y0=eval0, acq_func="EI",\
+                             n_calls=optimizationCallN, callback=[checkpointSaver])
 #####retrain optimal model######################################################################
     if retrainOptModelOn == True:
         if verbosity >= 1:
@@ -337,7 +382,7 @@ def modelDenseSimple(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     model.add(tf.keras.layers.Dense(parDict["denseNeuronN"],  activation="relu"))
     model.add(tf.keras.layers.Dense(parDict["denseNeuronN2"], activation="relu"))
     model.add(tf.keras.layers.Dense(targetN,                  activation="softmax"))
-    model.compile(optimizer=tf.keras.optimizers.SGD(lr=parDict["learningRate"]),\
+    model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=parDict["learningRate"]),\
                   loss=tf.keras.losses.sparse_categorical_crossentropy,metrics=["accuracy"])
     return model
 def modelDense(pars, dims, targetN, inputShape, pretrainedLayers=[]):
@@ -352,7 +397,7 @@ def modelDense(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     for i in range(parDict["denseLayerN"]):
         model.add(tf.keras.layers.Dense(parDict["denseNeuronN"], activation=parDict["actFunc"]))
     model.add(tf.keras.layers.Dense(targetN, activation="softmax"))
-    model.compile(optimizer=tf.keras.optimizers.SGD(lr=parDict["learningRate"]),\
+    model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=parDict["learningRate"]),\
                   loss=tf.keras.losses.sparse_categorical_crossentropy, metrics=["accuracy"])
     return model
 def modelStandard(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLayers=[]):
@@ -376,8 +421,8 @@ def modelStandard(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLa
         model.add(tf.keras.layers.Dense(parDict["denseNeuronN"],activation=parDict["actFunc"],\
                                         kernel_initializer=parDict["initFunc"]))
     model.add(tf.keras.layers.Dense(targetN, activation="softmax"))
-    optimizer = tf.keras.optimizers.SGD(lr=parDict["learningRate"], momentum=momentumRatio,\
-                                        nesterov=True)
+    optimizer = tf.keras.optimizers.SGD(learning_rate=parDict["learningRate"],\
+                                        momentum=momentumRatio, nesterov=True)
     model.compile(optimizer=optimizer,\
                   loss=tf.keras.losses.sparse_categorical_crossentropy, metrics=["accuracy"])
     return model
@@ -412,8 +457,8 @@ def modelConv2D(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLaye
         model.add(tf.keras.layers.Dense(neutronN, activation=parDict["actFunc"],\
                                         kernel_initializer=parDict["initFunc"]))
     model.add(tf.keras.layers.Dense(targetN, activation="softmax"))
-    optimizer = tf.keras.optimizers.SGD(lr=parDict["learningRate"], momentum=momentumRatio,\
-                                        nesterov=True)
+    optimizer = tf.keras.optimizers.SGD(learning_rate=parDict["learningRate"],\
+                                        momentum=momentumRatio, nesterov=True)
     model.compile(optimizer=optimizer,\
                   loss=tf.keras.losses.sparse_categorical_crossentropy, metrics=["accuracy"])
     return model
@@ -453,8 +498,8 @@ def modelRNN(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLayers=
     Z = tf.keras.layers.Dense(64, activation="relu", kernel_initializer="he_normal")(Z)
     Z = tf.keras.layers.Dense(targetN, activation="softmax")(Z)
     model = tf.keras.models.Model(inputs=inputZ, outputs=Z)
-    optimizer = tf.keras.optimizers.SGD(lr=parDict["learningRate"], momentum=momentumRatio,\
-                                        nesterov=True)
+    optimizer = tf.keras.optimizers.SGD(learning_rate=parDict["learningRate"],\
+                                        momentum=momentumRatio, nesterov=True)
     model.compile(optimizer=optimizer,\
                   loss=tf.keras.losses.sparse_categorical_crossentropy, metrics=["accuracy"])
     return model
@@ -495,8 +540,8 @@ def modelResNet50(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLa
 
     print(model.summary())
     #-------------------------------------------------------------------------
-    optimizer = tf.keras.optimizers.SGD(lr=parDict["learningRate"], momentum=momentumRatio,\
-                                        nesterov=True)
+    optimizer = tf.keras.optimizers.SGD(learning_rate=parDict["learningRate"],\
+                                        momentum=momentumRatio, nesterov=True)
     model.compile(optimizer=optimizer,\
                   loss=tf.keras.losses.sparse_categorical_crossentropy, metrics=["accuracy"])
     return model
@@ -532,13 +577,14 @@ def fitFuncGen(modelName, pars, dims, targetN, inputShape, inputX, inputY,\
                                         scheduleExpDecayConst)
         scheduler = tf.keras.callbacks.LearningRateScheduler(schedulerFunc)
         callbacks.append(scheduler)
-
-    trainX, validX, trainY, validY = train_test_split(inputX, inputY, test_size=valiR)
+    
     accuracies = []
     for dropSeed in range(dropMCN):
         if verbosity >= 1: print("\n############################MONTE CARLO DROPOUT:", dropSeed)
-        model=buildModel(modelName, pars, dims, targetN, inputShape,\
-                         dropoutMCSeed=dropSeed, pretrainedLayers=pretrainedLayers)
+        trainX, validX, trainY, validY = train_test_split(inputX, inputY, test_size=valiR,\
+                                                          shuffle=True, random_state=dropSeed)
+        model = buildModel(modelName, pars, dims, targetN, inputShape,\
+                           dropoutMCSeed=dropSeed, pretrainedLayers=pretrainedLayers)
         if verbosity >= 3: print(model.summary())
         history = model.fit(trainX, trainY, validation_data=(validX, validY),\
                             epochs=epochN, callbacks=callbacks)
@@ -556,7 +602,7 @@ def fitFuncGen(modelName, pars, dims, targetN, inputShape, inputX, inputY,\
     if verbosity >= 1:
         print("--------------------------------------------------------------RESULT:")
         print("Parameters:           ", parStr)
-        print("Ending Learning Rate =", K.eval(model.optimizer.lr))
+        print("Ending Learning Rate =", K.eval(model.optimizer.learning_rate))
         print("Model Accuracy       =", accuracy, "+/-", (accuSTD if (accuSTD > 0) else "NA"))
     if accuracy > OPTACCU:
         OPTACCU = 1.0*accuracy
@@ -589,8 +635,8 @@ def schedulerLambda(initLR, minLR, decayC):
 #autoencoder####################################################################################
 def buildAutoEncoder(encoder, decoder):
     model = tf.keras.models.Sequential([encoder, decoder])
-    model.compile(optimizer=tf.keras.optimizers.SGD(lr=1.0), loss="binary_crossentropy",\
-                  metrics=[roundedAccuracy])
+    model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=1.0),\
+                  loss="binary_crossentropy", metrics=[roundedAccuracy])
     return model
 def buildEncoderConv(inputShape, regularization=False):
     #############Adjustables#############
