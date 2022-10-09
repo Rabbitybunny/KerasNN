@@ -273,6 +273,7 @@ def main():
             if verbosity >= 2:
                 model = tf.keras.models.load_model(modelName)
                 print(model.summary())
+                print("Parameters:\n   ", optParDict)
             print("Current optimal accuracy:")
             print("   ", OPTACCU, "+/-", (OPTASTD if (OPTASTD > 0) else "NA"))
         except FileNotFoundError:
@@ -280,9 +281,10 @@ def main():
         except:
             raise
         #main optimization
-        result = gp_minimize(func=fitFunc, dimensions=dims,x0=par0,y0=eval0, acq_func="EI",\
-                             n_jobs=optimizationCoreN, n_calls=optimizationCallN,\
-                             callback=[checkpointSaver])
+        if optimizationCallN > 0:
+            result = gp_minimize(func=fitFunc, dimensions=dims, x0=par0,y0=eval0,acq_func="EI",\
+                                 n_jobs=optimizationCoreN, n_calls=optimizationCallN,\
+                                 callback=[checkpointSaver])
 #####retrain optimal model######################################################################
     if retrainOptModelOn == True:
         if verbosity >= 1:

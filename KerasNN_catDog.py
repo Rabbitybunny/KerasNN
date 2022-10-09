@@ -32,37 +32,37 @@ EXE_LOC = str(pathlib.Path().absolute())
 
 
 
-
-
-DATA_LOC = EXE_LOC + "/catDogData/"
-FIG_LOC  = EXE_LOC + "/catDogFig/"
+################################################################################################
+DATA_LOC     = EXE_LOC + "/catDogData/"
+TESTDATA_LOC = EXE_LOC + "/catDogData/zTest/"
+FIG_LOC      = EXE_LOC + "/catDogFig/"
 pathlib.Path(FIG_LOC).mkdir(exist_ok=True)
 def main():
     verbosity = 2
     np.random.seed(1)
 
-    modelName = "catDogStandard.model"
-    trainOn   = True               #False to test the currently saved model
+    modelName = "catDogConv2D.model"
+    trainOn   = True                #False to test the currently saved model
     printRawFigN  = 10
     printPredFigN = 10
     #dataset 
     testRatio       = 0.1
-    dropRatio       = 0.0          #ratio of data to simulate unlabeled Y's
-    validationRatio = 0.1          #ratio of data for validation
+    dropRatio       = 0.0           #ratio of data to simulate unlabeled Y's
+    validationRatio = 0.1           #ratio of data for validation
 
     #trainings
     trainAutoencoderOn    = False
     autoEpochN            = 30
-    
-    optModelSearchOn      = True
-    optimizationCoreN     = -1     #-1 to use all cores
-    optimizationCallN     = 30
+   
+    optModelSearchOn      = False
+    optimizationCoreN     = -1      #-1 to use all CPU cores
+    optimizationCallN     = 20      #note: increase to a difference >= 10 when reloading
     learningEpochN        = 6
     dropoutMonteCarloN    = 10
     
     retrainOptModelOn     = True
     learningEpochNOpt     = 30
-    dropoutMonteCarloNOpt = 30
+    dropoutMonteCarloNOpt = 1
 
     #model setup
     learningRate = Real(   low=1E-6, high=1E-1, prior="log-uniform", name="learningRate")
@@ -88,11 +88,11 @@ def main():
         par0 = [1E-3,         3,           128,          "relu"]
     elif "Standard" in modelName:
         dims = [learningRate, denseLayerN, denseNeuronN, actFunc, initFunc]
-        par0 = [1E-3,         3,           256,          "elu",   "he_normal"]
+        par0 = [1E-3,         3,           128,           "elu",   "he_normal"]
     elif "Conv2D" in modelName:
         denseLayerN  = Integer(low=1,    high=5,                         name="denseLayerN")
         dims=[learningRate,convLayerN,convFilterN,denseLayerN,denseNeuronN,actFunc,initFunc]
-        par0=[1E-3,        3,         256,        3,          128,        "elu",   "he_normal"]
+        par0=[1E-3,        3,         64,        3,          128,        "elu",   "he_normal"]
     elif "RNN" in modelName:
         dims = [learningRate]
         par0 = [1E-3]
@@ -119,32 +119,32 @@ def main():
         print("  retrainOptModelOn    :", retrainOptModelOn)
         print("  learningEpochNOpt    :", learningEpochNOpt)
         print("  dropoutMonteCarloNOpt:", dropoutMonteCarloNOpt)
-#####dataset####################################################################################
+#dataset########################################################################################
     nameY = ["dog", "cat"]
-    imageResize = (200, 200)
+    inputImageSize = (100, 100)
     inputXFull, inputYFull, testX, testY = [], [], [], []
 
     if verbosity >= 1: print("Loading data:")
     dataTrain, dataTest = [], []
     for yIter, label in enumerate(nameY):
-        trainPath = DATA_LOC + label + "/"
+        trainPath = DATA_LOC + "/" + label + "/"
         for imgName in os.listdir(trainPath):
             errorOccured, origImgFile, resizedImgFile = False, None, None
             try:
                 #stackoverflow.com/questions/9131992
                 #github.com/ImageMagick/ImageMagick/discussions/2754, just remove the ~ files
                 origImgFile = cv2.imread(trainPath+"/"+imgName, cv2.IMREAD_GRAYSCALE)
-                resizedImgFile = cv2.resize(origImgFile, imageResize)
+                resizedImgFile = zeroPadCenterResize(origImgFile, inputImageSize) 
             except Exception as e:
                 warnings.warn(str(e), Warning)
                 errorOccured = True
             if errorOccured == False: dataTrain.append([resizedImgFile, yIter])
-        testPath = DATA_LOC + label + "/"
+        testPath = TESTDATA_LOC + "/" + label + "/"
         for imgName in os.listdir(testPath):
             errorOccured, origImgFile, resizedImgFile = False, None, None
             try:
                 origImgFile = cv2.imread(testPath+"/"+imgName, cv2.IMREAD_GRAYSCALE)
-                resizedImgFile = cv2.resize(origImgFile, imageResize)
+                resizedImgFile = zeroPadCenterResize(origImgFile, inputImageSize) 
             except Exception as e:
                 warnings.warn(str(e), Warning)
                 errorOccured = True
@@ -156,7 +156,7 @@ def main():
     for X, Y in dataTest:
         testX.append(X)
         testY.append(Y)
-
+    
 
 
     ############################################################################################
@@ -166,6 +166,7 @@ def main():
         if np.random.uniform() < dropRatio: inputY.append(float("NaN"))
         else:                               inputY.append(y)
     #data normalization/standardization
+    inputY = np.array(inputY)
     inputXNorm = np.array([stand2dArray(X) for X in inputXFull])
     targetN    = len(nameY)
     inputShape = [inputXNorm.shape[1], inputXNorm.shape[2]]
@@ -185,7 +186,7 @@ def main():
             if verbosity >= 1:
                 print(" ", idx, nameY[inputYFull[idx]])
                 print("   ", filenameFig)
-#####autoencoder################################################################################
+#autoencoder####################################################################################
     if trainOn == False:
         trainAutoencoderOn = False
         optModelSearchOn   = False
@@ -256,7 +257,7 @@ def main():
                                 pretrainedLayers=pretrainedLayers, verbosity=verbosity)
         checkpointPath = EXE_LOC + "/" + modelName + "/checkpoint.pkl"
         checkpointSaver = CheckpointSaver(checkpointPath, compress=9, store_objective=False)
-        eval0 = None
+        optParDict, eval0 = {}, None
         #restore gp_minimize: remember to delete the .pkl file when changing model
         global OPTITER, OPTACCU, OPTASTD
         try:
@@ -265,14 +266,16 @@ def main():
             print("Reading the checkpoint file:\n    ", checkpointPath)
             OPTITER = len(eval0) - 1
             optimizationCallN -= OPTITER
-            optParDict = {}
+            parDicts = {}
             with open(modelName + "/pars.pickle", "rb") as handle:
-                optParDict = pickle.load(handle)
+                parDicts = pickle.load(handle)
+            optParDict = parDicts["opt"]
             OPTACCU = optParDict["accuracy"]
             OPTASTD = optParDict["accuSTD"]
             if verbosity >= 2:
                 model = tf.keras.models.load_model(modelName)
                 print(model.summary())
+                print("Parameters:\n   ", optParDict)
             print("Current optimal accuracy:")
             print("   ", OPTACCU, "+/-", (OPTASTD if (OPTASTD > 0) else "NA"))
         except FileNotFoundError:
@@ -280,18 +283,20 @@ def main():
         except:
             raise
         #main optimization
-        result = gp_minimize(func=fitFunc, dimensions=dims,x0=par0,y0=eval0, acq_func="EI",\
-                             n_jobs=optimizationCoreN, n_calls=optimizationCallN,\
-                             callback=[checkpointSaver])
-#####retrain optimal model######################################################################
+        if optimizationCallN > 0:
+            result = gp_minimize(func=fitFunc, dimensions=dims, x0=par0,y0=eval0,acq_func="EI",\
+                                 n_jobs=optimizationCoreN, n_calls=optimizationCallN,\
+                                 callback=[checkpointSaver])
+#retrain optimal model##########################################################################
     if retrainOptModelOn == True:
         if verbosity >= 1:
             print("######################################################RETRAIN OPTIMAL MODEL")
-        parOpt = []
+        optParDict, parOpt = {}, []
         try:
-            optParDict = {}
+            parDicts = {}
             with open(modelName + "/pars.pickle", "rb") as handle:
-                optParDict = pickle.load(handle)
+                parDicts = pickle.load(handle)
+                optParDict = parDicts["opt"]
             for dim in dims: parOpt.append(optParDict[dim.name])
         except FileNotFoundError:
             parOpt = par0.copy()
@@ -304,16 +309,20 @@ def main():
                                    validationRatio, learningEpochNOpt, dropoutMonteCarloNOpt,\
                                    pretrainedLayers=pretrainedLayers, verbosity=verbosity)
         optAccuracy = fitFuncOpt(parOpt)
-####prediction##################################################################################
+#prediction#####################################################################################
     if verbosity >= 1:
         print("###############################################################MODEL PREDICTION")
     #loading trained data
+    histDF, optParDict = {}, None
     try:
         model = tf.keras.models.load_model(modelName)
-        histDF = pd.read_pickle(modelName + "/history.pickle")
-        optParDict = {}
+        histDFs, parDicts = {}, {}
+        with open(modelName + "/history.pickle", "rb") as handle:
+            histDFs = pickle.load(handle) 
         with open(modelName + "/pars.pickle", "rb") as handle:
-            optParDict = pickle.load(handle)
+            parDicts = pickle.load(handle)
+        histDF     = histDFs["opt"]
+        optParDict = parDicts["opt"]
         if verbosity >= 2: print(model.summary())
     except OSError or FileNotFoundError:
         print("No trained model is found:\n    ", modelName)
@@ -321,6 +330,7 @@ def main():
     except:
         raise
     #data normalization/standardization + data dim requirement
+    testY = np.array(testY)
     testXNorm = np.array([stand2dArray(X) for X in testX])
     if convDimRequired: testXNorm = testXNorm.reshape(testXNorm.shape[0], *inputShape)
     #evaluation
@@ -334,10 +344,10 @@ def main():
     plt.close()
     if verbosity >= 1: print("Saving training result/prediction figures:\n    ", filenameFig)
     #prediction figures
-    if printPredFigN > 0:
+    if printPredFigN != 0:
         predValY = model.predict(testXNorm)
         predY = np.argmax(predValY, axis=-1)
-        for idx, valX in enumerate(testX[:printPredFigN]):
+        for idx, valX in enumerate(testXOrig[:min(len(testXOrig), printPredFigN)]):    
             plt.imshow(valX, cmap=plt.cm.binary)
             plt.title("Prediction: "+nameY[predY[idx]], fontsize=24)
             filenameFig = FIG_LOC + "predicted"+str(idx)+".png"
@@ -537,7 +547,7 @@ def modelResNet50(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLa
     parDict = {}
     for par, dim in zip(pars, dims): parDict[dim.name] = par
     #-------------------------------------------------------------------------
-    #doesn't quite work: expected shape=(None, 224, 224, 3)
+    #NOTE: ResNet50 expects inputShape=(None, 224, 224, 3)
     model = ResNet50(weights="imagenet")
 
     print(model.summary())
@@ -581,8 +591,10 @@ def fitFuncGen(modelName, pars, dims, targetN, inputShape, inputX, inputY,\
         callbacks.append(scheduler)
     
     accuracies = []
+    dropSeedRecord = 0
     for dropSeed in range(dropMCN):
         if verbosity >= 1: print("\n############################MONTE CARLO DROPOUT:", dropSeed)
+        dropSeedRecord = dropSeed + 0
         trainX, validX, trainY, validY = train_test_split(inputX, inputY, test_size=valiR,\
                                                           shuffle=True, random_state=dropSeed)
         model = buildModel(modelName, pars, dims, targetN, inputShape,\
@@ -594,7 +606,7 @@ def fitFuncGen(modelName, pars, dims, targetN, inputShape, inputX, inputY,\
         if verbosity >= 1: print("Drop-Seed", dropSeed, "Accuracy =", accuracies[dropSeed])
         if accuracies[dropSeed] < (OPTACCU - 6*OPTASTD):
             if verbosity >= 1: 
-                print("The accuracy is 6-sigma smaller than the current optimal accuracy:")
+                print("WARNING: 6-sigma smaller than the current optimal accuracy:")
                 print("   ", OPTACCU, "-", "6*" +str(OPTASTD))
                 print("Terminating the dropout Monte Carlo...\n")
             break
@@ -606,20 +618,38 @@ def fitFuncGen(modelName, pars, dims, targetN, inputShape, inputX, inputY,\
         print("Parameters:           ", parStr)
         print("Ending Learning Rate =", K.eval(model.optimizer.learning_rate))
         print("Model Accuracy       =", accuracy, "+/-", (accuSTD if (accuSTD > 0) else "NA"))
+
+    parDict["dropMCN"]  = dropSeedRecord
+    parDict["accuracy"] = accuracy
+    parDict["accuSTD"]  = accuSTD
+    parDict["isOpt"]    = False
+    parDicts, histDFs = {}, {}
+    try:
+        with open(modelName + "/pars.pickle", "rb") as handle:
+            parDicts = pickle.load(handle)
+        with open(modelName + "/history.pickle", "rb") as handle:
+            histDFs = pickle.load(handle)
+    except:
+        warnings.warn("fitFuncGen(): creating new pars.pickle and history.pickle", Warning) 
+    parDicts[str(OPTITER)] = parDict
     if accuracy > OPTACCU:
         OPTACCU = 1.0*accuracy
         OPTASTD = max(1.0*accuSTD, 0.0)
+
         histDF = pd.DataFrame(history.history)
-        optParDict = {"accuracy": accuracy,\
-                      "accuSTD":  accuSTD}
-        for par, dim in zip(pars, dims): optParDict[dim.name] = par
         model.save(modelName)
-        histDF.to_pickle(modelName + "/history.pickle")
+        histDFs[str(OPTITER)] = histDF
+        histDFs["opt"] = histDF
+        with open(modelName + "/history.pickle", "wb") as handle:
+            pickle.dump(histDFs, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+        parDict["isOpt"] = True
+        parDicts["opt"] = parDict 
         with open(modelName + "/pars.pickle", "wb") as handle:
-            pickle.dump(optParDict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            pickle.dump(parDicts, handle, protocol=pickle.HIGHEST_PROTOCOL)
         if verbosity >= 1: print("Optimal So Far!")
     if verbosity >= 1:
-        print("###################################################END MODEL FITTING\n\n")
+        print("##########################################################END MODEL FITTING\n\n")
     del model
     os.rename(tensorboardModelDir, \
               tensorboardModelDir.replace("tensorboardModelDir/", "tensorboardModelDir/Fin"))
@@ -698,6 +728,15 @@ def printTSNE(encodedXInput, knownYInput, nameY, figName, verbosity=1):
     plt.savefig(filenameFig, dpi=100)
     plt.close()
     if verbosity >= 1: print("   ", filenameFig)
+def cloneLayer(layer):
+    config = layer.get_config()
+    weights = layer.get_weights()
+    clonedLayer = type(layer).from_config(config)
+    clonedLayer.build(layer.input_shape)
+    clonedLayer.set_weights(weights)
+    return clonedLayer
+def roundedAccuracy(yTrue, yPred):
+    return tf.keras.metrics.binary_accuracy(tf.round(yTrue), tf.round(yPred))
 #helper funcs###################################################################################
 def stand2dArray(array, mean=None, std=None):    #following tf.image.per_image_standardization
     array = np.array(array)
@@ -707,13 +746,6 @@ def stand2dArray(array, mean=None, std=None):    #following tf.image.per_image_s
     return (array - mean)/max(std, 1/math.sqrt(flatArr.size))
 def get2dMean(array): return np.mean(np.array(array).flatten())
 def get2dSTD(array):  return np.std( np.array(array).flatten())
-def cloneLayer(layer):
-    config = layer.get_config()
-    weights = layer.get_weights()
-    clonedLayer = type(layer).from_config(config)
-    clonedLayer.build(layer.input_shape)
-    clonedLayer.set_weights(weights)
-    return clonedLayer
 def dropNaNY(inputX, inputY):
     inputXOutput = []
     inputYOutput = []
@@ -722,11 +754,26 @@ def dropNaNY(inputX, inputY):
             inputXOutput.append(inputX[i])
             inputYOutput.append(y)
     return np.array(inputXOutput), np.array(inputYOutput)
-def roundedAccuracy(yTrue, yPred):
-    return tf.keras.metrics.binary_accuracy(tf.round(yTrue), tf.round(yPred))
+def zeroPadCenterResize(imgFile, outputImgSize):
+    height, width = imgFile.shape
+    ratioWoH = outputImgSize[1]/outputImgSize[0]
+    width  = 1.0*width
+    height = ratioWoH*height
+
+    top, bottom, left, right = 0, 0, 0, 0
+    if width >= height:
+        top    = int(np.ceil( (width - height)/2))
+        bottom = int(np.floor((width - height)/2))
+    else:
+        left   = int(np.ceil( (height - width)/2))
+        right  = int(np.floor((height - width)/2))
+    outputImgFile = cv2.copyMakeBorder(imgFile, top, bottom, left, right,\
+                                       cv2.BORDER_CONSTANT, value=[0, 0, 0])
+    outputImgFile = cv2.resize(outputImgFile, outputImgSize)
+    return outputImgFile
 
 
-
+################################################################################################
 if __name__ == "__main__": main()
 
 
