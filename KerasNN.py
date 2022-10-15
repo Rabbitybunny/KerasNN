@@ -55,35 +55,35 @@ def main():
     trainAutoencoderOn    = False
     autoEpochN            = 30
     
-    optModelSearchOn      = True
-    optimizationCoreN     = -1      #-1 to use all cores
-    optimizationCallN     = 30      #note: increase to a difference >= 10 when reloading
-    learningEpochN        = 6
-    dropoutMonteCarloN    = 10
+    optModelSearchOn  = True
+    optimizationCoreN = -1      #-1 to use all cores
+    optimizationCallN = 30      #note: increase to a difference >= 10 when reloading
+    learningEpochN    = 6
+    bootstrappingN    = 10
     
-    retrainOptModelOn     = True
-    learningEpochNOpt     = 30
-    dropoutMonteCarloNOpt = 30
+    retrainOptModelOn = True
+    learningEpochNOpt = 30
+    bootstrappingNOpt = 30
 
     #model setup
-    learningRate = Real(   low=1E-6, high=1E-1, prior="log-uniform", name="learningRate")
-    convLayerN   = Integer(low=1,    high=5,                         name="convLayerN")
-    convFilterN  = Categorical(categories=[32, 64, 128, 256, 512],   name="convFilterN")
-    denseLayerN  = Integer(low=1,    high=10,                        name="denseLayerN")
-    denseNeuronN = Integer(low=10,   high=500,                       name="denseNeuronN")
-    actFunc  = Categorical(categories=["relu", "elu", "selu"],       name="actFunc")
-    initFunc = Categorical(categories=["he_normal", "he_uniform"],   name="initFunc")
+    learningRate = Real(   low=1E-6, high=1E-1, prior="log-uniform",     name="learningRate")
+    convLayerN   = Integer(low=1,    high=5,                             name="convLayerN")
+    convFilterN  = Categorical(categories=[32, 64, 128, 256, 512],       name="convFilterN")
+    denseLayerN  = Integer(low=1,    high=10,                            name="denseLayerN")
+    denseNeuronN = Integer(low=10,   high=500,                           name="denseNeuronN")
+    actFunc  = Categorical(categories=["relu", "elu", "selu"],           name="actFunc")
+    initFunc = Categorical(categories=["he_normal", "he_uniform"],       name="initFunc")
 
     dims, par0 = [], []
     if "SimpleDense" in modelName:
-        optModelSearchOn = False
-        dropoutMonteCarloNOpt = 1
+        optModelSearchOn  = False
+        bootstrappingNOpt = 1
         denseNeuronN2 = Integer(low=10,   high=500,                      name="denseNeuronN2")
         dims = [learningRate, denseNeuronN, denseNeuronN2]
         par0 = [1E-2,         300,          100]
     elif "Dense" in modelName:
-        dropoutMonteCarloN    = 1
-        dropoutMonteCarloNOpt = 1
+        bootstrappingN    = 1
+        bootstrappingNOpt = 1
         actFunc = Categorical(categories=["relu", "sigmoid"],            name="actFunc")
         dims = [learningRate, denseLayerN, denseNeuronN, actFunc]
         par0 = [1E-3,         3,           128,          "relu"]
@@ -113,13 +113,13 @@ def main():
         print("Loading training parameters:")
         print("  trainAutoencoderOn:", trainAutoencoderOn)
         print("  autoEpochN        :", autoEpochN)
-        print("  optModelSearchOn   :", optModelSearchOn)
-        print("  optimizationCallN  :", optimizationCallN)
-        print("  learningEpochN     :", learningEpochN )
-        print("  dropoutMonteCarloN: ", dropoutMonteCarloN)
-        print("  retrainOptModelOn    :", retrainOptModelOn)
-        print("  learningEpochNOpt    :", learningEpochNOpt)
-        print("  dropoutMonteCarloNOpt:", dropoutMonteCarloNOpt)
+        print("  optModelSearchOn :", optModelSearchOn)
+        print("  optimizationCallN:", optimizationCallN)
+        print("  learningEpochN   :", learningEpochN )
+        print("  bootstrappingN   : ", bootstrappingN)
+        print("  retrainOptModelOn :", retrainOptModelOn)
+        print("  learningEpochNOpt :", learningEpochNOpt)
+        print("  bootstrappingNOpt :", bootstrappingNOpt)
 #dataset########################################################################################
     fashionData = tf.keras.datasets.fashion_mnist
     [[inputXFull, inputYFull], [testX, testY]] = fashionData.load_data()#no need for testRatio
@@ -215,13 +215,13 @@ def main():
             if isinstance(layer, tf.keras.layers.Conv2D):
                 #layer.trainable = False
                 pretrainedLayers.append(layer)
-#searching for optimal model####################################################################
+#####searching for optimal model################################################################
     inputXNorm, inputY = dropNaNY(inputXNorm, inputY)  #dropping out untagged events
     if optModelSearchOn == True:
         if verbosity >= 1:
             print("################################################SEARCHING FOR OPTIMAL MODEL")
         fitFunc = fitFuncLambda(modelName, dims, targetN, inputShape, inputXNorm, inputY, \
-                                validationRatio, learningEpochN, dropoutMonteCarloN,\
+                                validationRatio, learningEpochN, bootstrappingN,\
                                 pretrainedLayers=pretrainedLayers, verbosity=verbosity)
         checkpointPath = EXE_LOC + "/" + modelName + "/checkpoint.pkl"
         checkpointSaver = CheckpointSaver(checkpointPath, compress=9, store_objective=False)
@@ -232,19 +232,19 @@ def main():
             restoredOpt = load_gp_minimize(checkpointPath)
             par0, eval0 = restoredOpt.x_iters, restoredOpt.func_vals
             print("Reading the checkpoint file:\n    ", checkpointPath)
-            OPTITER = len(eval0) - 1
-            optimizationCallN -= OPTITER
+            OPTITER = len(eval0)
+            optimizationCallN -= (OPTITER + 1)
             parDicts = {}
             with open(modelName + "/pars.pickle", "rb") as handle:
                 parDicts = pickle.load(handle)
             optParDict = parDicts["opt"]
-            OPTACCU = optParDict["accuracy"]
-            OPTASTD = optParDict["accuSTD"]
+            OPTACCU = optParDict["val_accuracy"]
+            OPTASTD = optParDict["val_accu_std"]
             if verbosity >= 2:
                 model = tf.keras.models.load_model(modelName)
                 print(model.summary())
                 print("Parameters:\n   ", optParDict)
-            print("Current optimal accuracy:")
+            print("Current optimal validation accuracy:")
             print("   ", OPTACCU, "+/-", (OPTASTD if (OPTASTD > 0) else "NA"))
         except FileNotFoundError:
             print("Saving checkpoint file:\n    ", checkpointPath)
@@ -274,7 +274,7 @@ def main():
         except:
             raise
         fitFuncOpt = fitFuncLambda(modelName, dims, targetN, inputShape, inputXNorm, inputY,\
-                                   validationRatio, learningEpochNOpt, dropoutMonteCarloNOpt,\
+                                   validationRatio, learningEpochNOpt, bootstrappingNOpt,\
                                    pretrainedLayers=pretrainedLayers, verbosity=verbosity)
         optAccuracy = fitFuncOpt(parOpt)
 #prediction#####################################################################################
@@ -315,7 +315,7 @@ def main():
     if printPredFigN != 0:
         predValY = model.predict(testXNorm)
         predY = np.argmax(predValY, axis=-1)
-        for idx, valX in enumerate(testXOrig[:min(len(testXOrig), printPredFigN)]):
+        for idx, valX in enumerate(testX[:min(len(testX), printPredFigN)]):    
             plt.imshow(valX, cmap=plt.cm.binary)
             plt.title("Prediction: "+nameY[predY[idx]], fontsize=24)
             filenameFig = FIG_LOC + "predicted"+str(idx)+".png"
@@ -334,19 +334,19 @@ def main():
 ################################################################################################
 ################################################################################################
 #model##########################################################################################
-def buildModel(modelName, pars, dims, targetN, inputShape, dropoutMCSeed=0,pretrainedLayers=[]):
+def buildModel(modelName, pars, dims, targetN, inputShape, pretrainedLayers=[]):
     if "SimpleDense" in modelName:
         return modelDenseSimple(pars, dims, targetN, inputShape, pretrainedLayers)
     elif "Dense" in modelName:
         return modelDense(pars, dims, targetN, inputShape, pretrainedLayers)
     elif "Standard" in modelName:
-        return modelStandard(pars, dims, targetN, inputShape, dropoutMCSeed, pretrainedLayers)
+        return modelStandard(pars, dims, targetN, inputShape, pretrainedLayers)
     elif "Conv2D" in modelName:
-        return modelConv2D(pars, dims, targetN, inputShape, dropoutMCSeed, pretrainedLayers)
+        return modelConv2D(pars, dims, targetN, inputShape, pretrainedLayers)
     elif "RNN" in modelName:
-        return modelRNN(pars, dims, targetN, inputShape, dropoutMCSeed, pretrainedLayers)
+        return modelRNN(pars, dims, targetN, inputShape, pretrainedLayers)
     elif "ResNet50" in modelName:
-        return modelResNet50(pars, dims, targetN, inputShape, dropoutMCSeed, pretrainedLayers)
+        return modelResNet50(pars, dims, targetN, inputShape, pretrainedLayers)
     else:
         print("No model found:\n    ", modelName)
         sys.exit(0)
@@ -380,7 +380,7 @@ def modelDense(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=parDict["learningRate"]),\
                   loss=tf.keras.losses.sparse_categorical_crossentropy, metrics=["accuracy"])
     return model
-def modelStandard(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLayers=[]):
+def modelStandard(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     #dims: learningRate, denseLayerN, denseNeuronN, actFunc, initFunc
     #############Adjustables#############
     dropoutRate   = 0.2
@@ -396,7 +396,7 @@ def modelStandard(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLa
     for i in range(parDict["denseLayerN"]):
         model.add(tf.keras.layers.Dense(parDict["denseNeuronN"],activation=parDict["actFunc"],\
                                         kernel_initializer=parDict["initFunc"]))
-        model.add(dropoutMC(rate=dropoutRate, seed=dropoutMCSeed))
+        model.add(dropoutMC(rate=dropoutRate))
         model.add(tf.keras.layers.BatchNormalization())
         model.add(tf.keras.layers.Dense(parDict["denseNeuronN"],activation=parDict["actFunc"],\
                                         kernel_initializer=parDict["initFunc"]))
@@ -406,13 +406,14 @@ def modelStandard(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLa
     model.compile(optimizer=optimizer,\
                   loss=tf.keras.losses.sparse_categorical_crossentropy, metrics=["accuracy"])
     return model
-def modelConv2D(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLayers=[]):
+def modelConv2D(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     #dims: learningRate, convLayerN, convFilterN, denseLayerN, denseNeuronN, actFunc, initFunc
     #############Adjustables#############
-    convLayerNinit  = 64
-    convFilterNinit = (8, 8)
-    dropoutRate     = 0.5
-    momentumRatio   = 0.9
+    convLayerNinit   = 64
+    convFilterNinit  = (8, 8)
+    convDropoutRate  = 0.5
+    denseDropoutRate = 0.2
+    momentumRatio    = 0.9
     #####################################
     parDict = {}
     for par, dim in zip(pars, dims): parDict[dim.name] = par
@@ -427,12 +428,13 @@ def modelConv2D(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLaye
     for i in range(parDict["convLayerN"]):
         if pow(2, i+1) < min(inputShape[0], inputShape[1]): 
             model.add(tf.keras.layers.MaxPool2D(pool_size=(2, 2)))
+        model.add(tf.keras.layers.Dropout(rate=convDropoutRate))
         filterN = max(8, parDict["convFilterN"]/pow(2, parDict["convLayerN"]-1-i))
         model.add(tf.keras.layers.Conv2D(filterN, (3, 3), activation=parDict["actFunc"],\
                                          padding="SAME"))
     model.add(tf.keras.layers.Flatten())
     for i in range(parDict["denseLayerN"]):
-        model.add(tf.keras.layers.Dropout(rate=dropoutRate, seed=dropoutMCSeed))
+        model.add(tf.keras.layers.Dropout(rate=denseDropoutRate))
         neutronN = max(8, parDict["denseNeuronN"]/pow(2, i))
         model.add(tf.keras.layers.Dense(neutronN, activation=parDict["actFunc"],\
                                         kernel_initializer=parDict["initFunc"]))
@@ -444,7 +446,7 @@ def modelConv2D(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLaye
     return model
 #https://machinelearningmastery.com/how-to-implement-major-architecture-innovations-for-
 #convolutional-neural-networks/
-def modelRNN(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLayers=[]):
+def modelRNN(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     #dims: learningRate
     #############Adjustables#############
     convLayerNinit  = 64
@@ -474,7 +476,7 @@ def modelRNN(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLayers=
     
     Z = tf.keras.layers.GlobalAvgPool2D()(Z)
     Z = tf.keras.layers.Flatten()(Z)
-    Z = tf.keras.layers.Dropout(rate=dropoutRate, seed=dropoutMCSeed)(Z)
+    Z = tf.keras.layers.Dropout(rate=dropoutRate)(Z)
     Z = tf.keras.layers.Dense(64, activation="relu", kernel_initializer="he_normal")(Z)
     Z = tf.keras.layers.Dense(targetN, activation="softmax")(Z)
     model = tf.keras.models.Model(inputs=inputZ, outputs=Z)
@@ -504,7 +506,7 @@ def residualBlock(inputZ, filterN, strideN=1):
     return mergedZ
 #https://stackoverflow.com/questions/49492255
 #also include method on how to inject layers in existing model
-def modelResNet50(pars, dims, targetN, inputShape, dropoutMCSeed=0, pretrainedLayers=[]):
+def modelResNet50(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     #dims: learningRate
     #############Adjustables#############
     dropoutRate     = 0.5
@@ -530,7 +532,7 @@ class dropoutMC(tf.keras.layers.Dropout):
         return super().call(inputs, training=True) #to be turned off during .evaluation()
 #model fitter###################################################################################
 def fitFuncGen(modelName, pars, dims, targetN, inputShape, inputX, inputY,\
-               valiR, epochN, dropMCN, pretrainedLayers=[], verbosity=1):
+               valiR, epochN, bootstrappingN, pretrainedLayers=[], verbosity=1):
     #############Adjustables#############
     minLearningRate       = pow(10, -6)
     scheduleExpDecayConst = 10
@@ -558,39 +560,38 @@ def fitFuncGen(modelName, pars, dims, targetN, inputShape, inputX, inputY,\
         scheduler = tf.keras.callbacks.LearningRateScheduler(schedulerFunc)
         callbacks.append(scheduler)
     
-    accuracies = []
-    dropSeedRecord = 0
-    for dropSeed in range(dropMCN):
-        if verbosity >= 1: print("\n############################MONTE CARLO DROPOUT:", dropSeed)
-        dropSeedRecord = dropSeed + 0
+    val_accuracies = []
+    for bootSeed in range(bootstrappingN):
+        if verbosity >= 1: print("\n############################BOOTSTRAPPING:", bootSeed)
         trainX, validX, trainY, validY = train_test_split(inputX, inputY, test_size=valiR,\
-                                                          shuffle=True, random_state=dropSeed)
+                                                          shuffle=True, random_state=bootSeed)
+        tf.random.set_seed(bootSeed)    #for dropout Monte Carlo layers
         model = buildModel(modelName, pars, dims, targetN, inputShape,\
-                           dropoutMCSeed=dropSeed, pretrainedLayers=pretrainedLayers)
+                           pretrainedLayers=pretrainedLayers)
         if verbosity >= 3: print(model.summary())
         history = model.fit(trainX, trainY, validation_data=(validX, validY),\
                             epochs=epochN, callbacks=callbacks)
-        accuracies.append(history.history["val_accuracy"][-1])
-        if verbosity >= 1: print("Drop-Seed", dropSeed, "Accuracy =", accuracies[dropSeed])
-        if accuracies[dropSeed] < (OPTACCU - 6*OPTASTD):
+        val_accuracies.append(history.history["val_accuracy"][-1])
+        if verbosity >= 1: print("val_accuracy =", val_accuracies[bootSeed])
+        if (OPTASTD > 0) and (val_accuracies[bootSeed] < (OPTACCU - 6*OPTASTD)):
             if verbosity >= 1: 
-                print("WARNING: 6-sigma smaller than the current optimal accuracy:")
+                print("WARNING: 6-sigma smaller than the current optimal validation accuracy:")
                 print("   ", OPTACCU, "-", "6*" +str(OPTASTD))
-                print("Terminating the dropout Monte Carlo...\n")
+                print("Terminating the bootstrapping...\n")
             break
-    accuracy = sum(accuracies)/len(accuracies)
-    accuSTD = -1
-    if len(accuracies) > 1: accuSTD = np.std(np.array(accuracies), ddof=1)
+    val_accuracy = np.mean(val_accuracies)
+    val_accu_std = 0.0
+    if len(val_accuracies) >= 2: val_accu_std = np.std(val_accuracies, ddof=1)
     if verbosity >= 1:
         print("--------------------------------------------------------------RESULT:")
-        print("Parameters:           ", parStr)
-        print("Ending Learning Rate =", K.eval(model.optimizer.learning_rate))
-        print("Model Accuracy       =", accuracy, "+/-", (accuSTD if (accuSTD > 0) else "NA"))
+        print("Parameters:                ", parStr)
+        print("Ending Learning Rate      =", K.eval(model.optimizer.learning_rate))
+        print("Model Validation Accuracy =", val_accuracy, "+/-", val_accu_std)
 
-    parDict["dropMCN"]  = dropSeedRecord
-    parDict["accuracy"] = accuracy
-    parDict["accuSTD"]  = accuSTD
-    parDict["isOpt"]    = False
+    parDict["bootstrappingN"] = bootstrappingN
+    parDict["val_accuracy"]   = val_accuracy
+    parDict["val_accu_std"]   = val_accu_std
+    parDict["isOpt"]          = False
     parDicts, histDFs = {}, {}
     try:
         with open(modelName + "/pars.pickle", "rb") as handle:
@@ -600,9 +601,9 @@ def fitFuncGen(modelName, pars, dims, targetN, inputShape, inputX, inputY,\
     except:
         warnings.warn("fitFuncGen(): creating new pars.pickle and history.pickle", Warning) 
     parDicts[str(OPTITER)] = parDict
-    if accuracy > OPTACCU:
-        OPTACCU = 1.0*accuracy
-        OPTASTD = max(1.0*accuSTD, 0.0)
+    if val_accuracy > OPTACCU:
+        OPTACCU = 1.0*val_accuracy
+        OPTASTD = max(1.0*val_accu_std, 0.0)
 
         histDF = pd.DataFrame(history.history)
         model.save(modelName)
@@ -622,11 +623,11 @@ def fitFuncGen(modelName, pars, dims, targetN, inputShape, inputX, inputY,\
     os.rename(tensorboardModelDir, \
               tensorboardModelDir.replace("tensorboardModelDir/", "tensorboardModelDir/Fin"))
     OPTITER += 1
-    return -accuracy
+    return -val_accuracy
 def fitFuncLambda(modelName, dims, targetN, inputShape, trainX, trainY,\
-                  valiR, epochN, dropMCN, pretrainedLayers=[], verbosity=1):
+                  valiR, epochN, bootstrappingN, pretrainedLayers=[], verbosity=1):
     return lambda pars: fitFuncGen(modelName, pars, dims, targetN, inputShape,trainX,trainY,\
-                                   valiR, epochN, dropMCN, pretrainedLayers=[],\
+                                   valiR, epochN, bootstrappingN, pretrainedLayers=[],\
                                    verbosity=verbosity)
 def learningRateFunc(epoch, initLR, minLR, decayC):
     return initLR*pow(0.1, 1.0*epoch/decayC) + minLR
@@ -722,11 +723,27 @@ def dropNaNY(inputX, inputY):
             inputXOutput.append(inputX[i])
             inputYOutput.append(y)
     return np.array(inputXOutput), np.array(inputYOutput)
-    
+def zeroPadCenterResize(imgFile, outputImgSize):
+    height, width = imgFile.shape
+    ratioWoH = outputImgSize[1]/outputImgSize[0]
+    width  = 1.0*width
+    height = ratioWoH*height
+
+    top, bottom, left, right = 0, 0, 0, 0
+    if width >= height:
+        top    = int(np.ceil( (width - height)/2))
+        bottom = int(np.floor((width - height)/2))
+    else:
+        left   = int(np.ceil( (height - width)/2))
+        right  = int(np.floor((height - width)/2))
+    outputImgFile = cv2.copyMakeBorder(imgFile, top, bottom, left, right,\
+                                       cv2.BORDER_CONSTANT, value=[0, 0, 0])
+    outputImgFile = cv2.resize(outputImgFile, outputImgSize)
+    return outputImgFile
+
 
 ################################################################################################
 if __name__ == "__main__": main()
-
 
 
 

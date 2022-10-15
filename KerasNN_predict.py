@@ -38,7 +38,7 @@ FIG_LOC      = EXE_LOC + "/catDogFig/"
 pathlib.Path(FIG_LOC).mkdir(exist_ok=True)
 def main():
     verbosity = 2
-    modelName = "catDogStandard.model"
+    modelName = "catDogConv2D_.model"
     printPredFigN = -1
 
     convDimRequired = ("Conv2D" in modelName) or ("RNN" in modelName) or ("ResNet" in modelName)
@@ -79,6 +79,7 @@ def main():
             parDicts = pickle.load(handle)
         histDF     = histDFs["opt"]
         optParDict = parDicts["opt"]
+        if verbosity >= 1: print("\nOptimal parameters:\n   ", optParDict)
         if verbosity >= 2: print(model.summary())
     except OSError or FileNotFoundError:
         print("No trained model is found:\n    ", modelName)
@@ -88,7 +89,9 @@ def main():
     #data normalization/standardization + data dim requirement
     testY = np.array(testY)
     testXNorm = np.array([stand2dArray(X) for X in testX])
-    if convDimRequired: testXNorm = testXNorm.reshape(testXNorm.shape[0], *inputShape)
+    if convDimRequired: 
+        inputShape = [testXNorm.shape[1], testXNorm.shape[2], 1] #note: needed for conv2D
+        testXNorm = testXNorm.reshape(testXNorm.shape[0], *inputShape)
     #evaluation
     model.evaluate(x=testXNorm, y=testY)
     histDF.plot(figsize=(8, 5))
