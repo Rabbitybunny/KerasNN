@@ -41,6 +41,7 @@ This final result of ResNet is not quite satisfactory; it's likely causes by a m
 
 ## Extra Notes:
 - the standardization so far has been done for each 2d sample figure independently. For input with much lower dimension and much large ranges, it's probably best to get an over all mean and std among all the sample entries. If this is the case, then the test sample must be standardized using the mean and std derived from the training samples.
+- in case of overfitting and result in large validation loss, checkout <a href="https://datascience.stackexchange.com/questions/65471">stackexchange</a>. Notice that Monte Carlo dropout is for preventing overfitting, and should be distinguished from bootstrapping. With dropout layers (<a href="https://www.tensorflow.org/api_docs/python/tf/keras/layers/Dropout">link</a>), one does not need to worry about shuffling training-validation data set at each training epoch.
 
 ## References:
 - A. Géron, Hands-On Machine Learning with Scikit-Learn, Keras, and TensorFlow: Concepts, Tools, and Techniques to Build Intelligent Systems 2nd Edition (2019) (<a href="https://www.amazon.com/Hands-Machine-Learning-Scikit-Learn-TensorFlow/dp/1492032646">Amazon</a>)
