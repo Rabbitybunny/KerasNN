@@ -27,11 +27,10 @@ from skopt import gp_minimize
 from skopt.callbacks import CheckpointSaver
 from skopt import load as load_gp_minimize
 from skopt.space import Integer, Real, Categorical
+
+from _GlobalFuncs import *
 OPTITER, OPTACCU, OPTASTD = 0, 0, 0
 EXE_LOC = str(pathlib.Path().absolute())
-
-
-
 ################################################################################################
 DATA_LOC     = EXE_LOC + "/catDogData/"
 TESTDATA_LOC = EXE_LOC + "/catDogData/zTest/"
@@ -56,9 +55,9 @@ def main():
    
     optModelSearchOn      = True
     optimizationCoreN     = -1      #-1 to use all CPU cores
-    optimizationCallN     = 0      #note: increase to a difference >= 10 when reloading
-    learningEpochN        = 6
-    bootstrappingN        = 10
+    optimizationCallN     = 30      #note: increase to a difference >= 10 when reloading
+    learningEpochN        = 10      #note: equilibrium needed if # of MC dropout layer varies
+    bootstrappingN        = 6
     
     retrainOptModelOn     = True
     learningEpochNOpt     = 30
@@ -176,11 +175,11 @@ def main():
         inputXNorm = inputXNorm.reshape(inputXNorm.shape[0], *inputShape)
     #raw figures
     if printRawFigN > 0:
-        if verbosity >= 1: print("Saving sample figures:")
+        if verbosity >= 1: print("Saving preprocessed figures:")
         for idx, valX in enumerate(inputXFull[:printRawFigN]):
             plt.imshow(valX, cmap=plt.cm.binary)
             plt.title(nameY[inputYFull[idx]], fontsize=24)
-            filenameFig = FIG_LOC + "raw"+str(idx)+".png"
+            filenameFig = FIG_LOC + "preprocessed"+str(idx)+".png"
             plt.savefig(filenameFig, dpi=100)
             plt.close()
             if verbosity >= 1:
@@ -438,13 +437,14 @@ def modelStandard(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     model.compile(optimizer=optimizer,\
                   loss=tf.keras.losses.sparse_categorical_crossentropy, metrics=["accuracy"])
     return model
+#https://stats.stackexchange.com/questions/240305
 def modelConv2D(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     #dims: learningRate, convLayerN, convFilterN, denseLayerN, denseNeuronN, actFunc, initFunc
     #############Adjustables#############
     convLayerNinit   = 64
     convFilterNinit  = (8, 8)
-    convDropoutRate  = 0.5
-    denseDropoutRate = 0.2
+    convDropoutRate  = 0.1
+    denseDropoutRate = 0.5
     momentumRatio    = 0.9
     #####################################
     parDict = {}
@@ -456,18 +456,17 @@ def modelConv2D(pars, dims, targetN, inputShape, pretrainedLayers=[]):
         model.add(tf.keras.layers.Conv2D(convLayerNinit, convFilterNinit, 
                                          activation=parDict["actFunc"],\
                                          padding="SAME", input_shape=inputShape))
-
     for i in range(parDict["convLayerN"]):
         if pow(2, i+1) < min(inputShape[0], inputShape[1]): 
             model.add(tf.keras.layers.MaxPool2D(pool_size=(2, 2)))
-        model.add(tf.keras.layers.Dropout(rate=convDropoutRate))
         filterN = max(8, parDict["convFilterN"]/pow(2, parDict["convLayerN"]-1-i))
         model.add(tf.keras.layers.Conv2D(filterN, (3, 3), activation=parDict["actFunc"],\
                                          padding="SAME"))
+        model.add(tf.keras.layers.Dropout(rate=convDropoutRate))
     model.add(tf.keras.layers.Flatten())
     for i in range(parDict["denseLayerN"]):
-        model.add(tf.keras.layers.Dropout(rate=denseDropoutRate))
         neutronN = max(8, parDict["denseNeuronN"]/pow(2, i))
+        model.add(tf.keras.layers.Dropout(rate=denseDropoutRate))
         model.add(tf.keras.layers.Dense(neutronN, activation=parDict["actFunc"],\
                                         kernel_initializer=parDict["initFunc"]))
     model.add(tf.keras.layers.Dense(targetN, activation="softmax"))
@@ -562,6 +561,70 @@ def modelResNet50(pars, dims, targetN, inputShape, pretrainedLayers=[]):
 class dropoutMC(tf.keras.layers.Dropout):
     def call(self, inputs):
         return super().call(inputs, training=True) #to be turned off during .evaluation()
+#autoencoder####################################################################################
+def buildAutoEncoder(encoder, decoder):
+    model = tf.keras.models.Sequential([encoder, decoder])
+    model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=1.0),\
+                  loss="binary_crossentropy", metrics=[roundedAccuracy])
+    return model
+def buildEncoderConv(inputShape, regularization=False):
+    #############Adjustables#############
+    convFilterNinit = (8, 8)
+    #####################################
+    model = tf.keras.models.Sequential()
+    model.add(tf.keras.layers.Conv2D(32, convFilterNinit, activation="selu", padding="SAME",\
+                                     input_shape=inputShape))
+    model.add(tf.keras.layers.MaxPool2D(pool_size=(2, 2)))
+    if ("gaus" in regularization) or ("Gaus" in regularization):
+        model.add(tf.keras.layers.GaussianNoise(0.1))
+    elif ("drop" in regularization) or ("Drop" in regularization):
+        model.add(tf.keras.layers.Dropout(0.5))
+    if ("l1" in regularization) or ("L1" in regularization):
+        model.add(tf.keras.layers.Conv2D(64, (3, 3), activation="selu", padding="SAME",\
+                      activity_regularizer=tf.keras.regularizers.l1(10e-5)))
+    elif ("l2" in regularization) or ("L2" in regularization):
+        model.add(tf.keras.layers.Conv2D(64, (3, 3), activation="selu", padding="SAME",\
+                      activity_regularizer=tf.keras.regularizers.l2(10e-2)))
+    else:
+        model.add(tf.keras.layers.Conv2D(64, (3, 3), activation="selu", padding="SAME"));
+    model.add(tf.keras.layers.MaxPool2D(pool_size=(2, 2)))
+    return model
+def buildDecoderConv(inputShape):
+    model = tf.keras.models.Sequential()
+    model.add(tf.keras.layers.Conv2DTranspose(32, (3, 3), strides=2, activation="selu",\
+                                              padding="SAME", input_shape=inputShape))
+    model.add(tf.keras.layers.Conv2DTranspose(1,  (3, 3), strides=2, activation="sigmoid",\
+                                              padding="SAME"))
+    return model
+def printTSNE(encodedXInput, knownYInput, nameY, figName, verbosity=1):
+    if encodedXInput is None: return
+    encodedX, knownY = dropNaNY(encodedXInput, knownYInput)
+    tsne = TSNE()
+    if len(encodedX.shape) > 2:
+        shapeX1D = 1
+        for n in encodedX.shape[1:]: shapeX1D *= n
+        encodedX = encodedX.reshape(encodedX.shape[0], shapeX1D)
+    encodedX2D = tsne.fit_transform(encodedX) #note: different outcome everytime
+
+    fig = plt.figure(figsize=(8, 6))
+    gs = gridspec.GridSpec(1, 1)
+    ax = []
+    for i in range (gs.nrows*gs.ncols): ax.append(fig.add_subplot(gs[i]))
+
+    maxY = np.max(knownY)
+    minY = np.min(knownY)
+    cmap = plt.get_cmap("jet", maxY-minY+1)
+    labelFormat = FuncFormatter(lambda x, pos: nameY[int(x)]) #pos required by FuncFormatter
+    plot = ax[0].scatter(encodedX2D[:,0], encodedX2D[:,1], c=knownY, s=10, cmap=cmap,\
+                         vmax=(maxY+0.5), vmin=(minY-0.5))
+    fig.colorbar(plot, ax=ax[0], format=labelFormat, ticks=np.arange(minY, maxY+1))
+    ax[0].set_title("Encoder t-SNE Visualization")
+    
+    filenameFig = FIG_LOC + "-" + figName + ".png"
+    gs.tight_layout(fig)
+    plt.savefig(filenameFig, dpi=100)
+    plt.close()
+    if verbosity >= 1: print("   ", filenameFig)
 #model fitter###################################################################################
 def fitFuncGen(modelName, pars, dims, targetN, inputShape, inputX, inputY,\
                valiR, epochN, bootstrappingN, pretrainedLayers=[], verbosity=1):
@@ -661,118 +724,6 @@ def fitFuncLambda(modelName, dims, targetN, inputShape, trainX, trainY,\
     return lambda pars: fitFuncGen(modelName, pars, dims, targetN, inputShape,trainX,trainY,\
                                    valiR, epochN, bootstrappingN, pretrainedLayers=[],\
                                    verbosity=verbosity)
-def learningRateFunc(epoch, initLR, minLR, decayC):
-    return initLR*pow(0.1, 1.0*epoch/decayC) + minLR
-def schedulerLambda(initLR, minLR, decayC):
-    return lambda epoch: learningRateFunc(epoch, initLR, minLR, decayC)
-#autoencoder####################################################################################
-def buildAutoEncoder(encoder, decoder):
-    model = tf.keras.models.Sequential([encoder, decoder])
-    model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=1.0),\
-                  loss="binary_crossentropy", metrics=[roundedAccuracy])
-    return model
-def buildEncoderConv(inputShape, regularization=False):
-    #############Adjustables#############
-    convFilterNinit = (8, 8)
-    #####################################
-    model = tf.keras.models.Sequential()
-    model.add(tf.keras.layers.Conv2D(32, convFilterNinit, activation="selu", padding="SAME",\
-                                     input_shape=inputShape))
-    model.add(tf.keras.layers.MaxPool2D(pool_size=(2, 2)))
-    if ("gaus" in regularization) or ("Gaus" in regularization):
-        model.add(tf.keras.layers.GaussianNoise(0.1))
-    elif ("drop" in regularization) or ("Drop" in regularization):
-        model.add(tf.keras.layers.Dropout(0.5))
-    if ("l1" in regularization) or ("L1" in regularization):
-        model.add(tf.keras.layers.Conv2D(64, (3, 3), activation="selu", padding="SAME",\
-                      activity_regularizer=tf.keras.regularizers.l1(10e-5)))
-    elif ("l2" in regularization) or ("L2" in regularization):
-        model.add(tf.keras.layers.Conv2D(64, (3, 3), activation="selu", padding="SAME",\
-                      activity_regularizer=tf.keras.regularizers.l2(10e-2)))
-    else:
-        model.add(tf.keras.layers.Conv2D(64, (3, 3), activation="selu", padding="SAME"));
-    model.add(tf.keras.layers.MaxPool2D(pool_size=(2, 2)))
-    return model
-def buildDecoderConv(inputShape):
-    model = tf.keras.models.Sequential()
-    model.add(tf.keras.layers.Conv2DTranspose(32, (3, 3), strides=2, activation="selu",\
-                                              padding="SAME", input_shape=inputShape))
-    model.add(tf.keras.layers.Conv2DTranspose(1,  (3, 3), strides=2, activation="sigmoid",\
-                                              padding="SAME"))
-    return model
-def printTSNE(encodedXInput, knownYInput, nameY, figName, verbosity=1):
-    if encodedXInput is None: return
-    encodedX, knownY = dropNaNY(encodedXInput, knownYInput)
-    tsne = TSNE()
-    if len(encodedX.shape) > 2:
-        shapeX1D = 1
-        for n in encodedX.shape[1:]: shapeX1D *= n
-        encodedX = encodedX.reshape(encodedX.shape[0], shapeX1D)
-    encodedX2D = tsne.fit_transform(encodedX) #note: different outcome everytime
-
-    fig = plt.figure(figsize=(8, 6))
-    gs = gridspec.GridSpec(1, 1)
-    ax = []
-    for i in range (gs.nrows*gs.ncols): ax.append(fig.add_subplot(gs[i]))
-
-    maxY = np.max(knownY)
-    minY = np.min(knownY)
-    cmap = plt.get_cmap("jet", maxY-minY+1)
-    labelFormat = FuncFormatter(lambda x, pos: nameY[int(x)]) #pos required by FuncFormatter
-    plot = ax[0].scatter(encodedX2D[:,0], encodedX2D[:,1], c=knownY, s=10, cmap=cmap,\
-                         vmax=(maxY+0.5), vmin=(minY-0.5))
-    fig.colorbar(plot, ax=ax[0], format=labelFormat, ticks=np.arange(minY, maxY+1))
-    ax[0].set_title("Encoder t-SNE Visualization")
-    
-    filenameFig = FIG_LOC + "-" + figName + ".png"
-    gs.tight_layout(fig)
-    plt.savefig(filenameFig, dpi=100)
-    plt.close()
-    if verbosity >= 1: print("   ", filenameFig)
-def cloneLayer(layer):
-    config = layer.get_config()
-    weights = layer.get_weights()
-    clonedLayer = type(layer).from_config(config)
-    clonedLayer.build(layer.input_shape)
-    clonedLayer.set_weights(weights)
-    return clonedLayer
-def roundedAccuracy(yTrue, yPred):
-    return tf.keras.metrics.binary_accuracy(tf.round(yTrue), tf.round(yPred))
-#helper funcs###################################################################################
-def stand2dArray(array, mean=None, std=None):    #following tf.image.per_image_standardization
-    array = np.array(array)
-    flatArr = array.flatten()
-    if mean is None: mean = np.mean(flatArr)
-    if std is None:  std = np.std(flatArr)
-    return (array - mean)/max(std, 1/math.sqrt(flatArr.size))
-def get2dMean(array): return np.mean(np.array(array).flatten())
-def get2dSTD(array):  return np.std( np.array(array).flatten())
-def dropNaNY(inputX, inputY):
-    inputXOutput = []
-    inputYOutput = []
-    for i, y in enumerate(inputY):
-        if math.isnan(y) == False:
-            inputXOutput.append(inputX[i])
-            inputYOutput.append(y)
-    return np.array(inputXOutput), np.array(inputYOutput)
-def zeroPadCenterResize(imgFile, outputImgSize):
-    height, width = imgFile.shape
-    ratioWoH = outputImgSize[1]/outputImgSize[0]
-    width  = 1.0*width
-    height = ratioWoH*height
-
-    top, bottom, left, right = 0, 0, 0, 0
-    if width >= height:
-        top    = int(np.ceil( (width - height)/2))
-        bottom = int(np.floor((width - height)/2))
-    else:
-        left   = int(np.ceil( (height - width)/2))
-        right  = int(np.floor((height - width)/2))
-    outputImgFile = cv2.copyMakeBorder(imgFile, top, bottom, left, right,\
-                                       cv2.BORDER_CONSTANT, value=[0, 0, 0])
-    outputImgFile = cv2.resize(outputImgFile, outputImgSize)
-    return outputImgFile
-
 
 ################################################################################################
 if __name__ == "__main__": main()
