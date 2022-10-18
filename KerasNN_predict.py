@@ -27,53 +27,65 @@ from skopt import gp_minimize
 from skopt.callbacks import CheckpointSaver
 from skopt import load as load_gp_minimize
 from skopt.space import Integer, Real, Categorical
-
 from _GlobalFuncs import *
-EXE_LOC = str(pathlib.Path().absolute())
+
+
+
+
+
 ################################################################################################
-TESTDATA_LOC = EXE_LOC + "/catDogData/ztest/"
-FIG_LOC      = EXE_LOC + "/catDogFigPred/"
-pathlib.Path(FIG_LOC).mkdir(exist_ok=True)
+INPUT_LOC  = "./catDogData/zInput/"
+OUTPUT_LOC = "./catDogFigPred/"
 def main():
-    verbosity = 2
+    verbosity = 3
     modelName = "catDogConv2D_.model"
     printPreproFigN = -1
     printPredFigN   = -1
+################################################################################################
 
+
+
+
+
+
+
+
+
+
+
+
+    #loading dataset
     convDimRequired = ("Conv2D" in modelName) or ("RNN" in modelName) or ("ResNet" in modelName)
-#dataset########################################################################################
-    nameY = ["dog", "cat"]
-    inputImageSize = (100, 100)             #width, height
-    testXOrig, testX, testY = [], [], []
+    with open(modelName + "/trainingInput.pickle", "rb") as handle:
+        trainingInputDict = pickle.load(handle)
+    nameY          = trainingInputDict["nameY"]
+    inputImageSize = trainingInputDict["inputImageSize"]
+    testXOrig, testX = [], []
 
     if verbosity >= 1: print("Loading data:")
-    dataTest = []
-    for yIter, label in enumerate(nameY):
-        testPath = TESTDATA_LOC + "/" + label + "/"
-        for imgName in os.listdir(testPath):
-            errorOccured, origImgFile, resizedImgFile = False, None, None
-            try:
-                origImgFile = cv2.imread(testPath+"/"+imgName)
-                origImgFile = cv2.cvtColor(origImgFile, cv2.COLOR_BGR2RGB)
-                resizedImgFile = cv2.cvtColor(origImgFile, cv2.COLOR_RGB2GRAY)
-                resizedImgFile = zeroPadCenterResize(resizedImgFile, inputImageSize) 
-                #resizedImgFile = cropCenterResize(resizedImgFile, inputImageSize) 
-            except Exception as e:
-                warnings.warn(str(e), Warning)
-                errorOccured = True
-            if errorOccured == False: 
-                testXOrig.append(origImgFile)
-                testX    .append(resizedImgFile)
-                testY    .append(yIter)
+    for imgName in os.listdir(INPUT_LOC):
+        errorOccured, origImgFile, resizedImgFile = False, None, None
+        try:
+            origImgFile = cv2.imread(INPUT_LOC+"/"+imgName)
+            origImgFile = cv2.cvtColor(origImgFile, cv2.COLOR_BGR2RGB)
+            resizedImgFile = cv2.cvtColor(origImgFile, cv2.COLOR_RGB2GRAY)
+            resizedImgFile = zeroPadCenterResize(resizedImgFile, inputImageSize) 
+            #resizedImgFile = cropCenterResize(resizedImgFile, inputImageSize) 
+        except Exception as e:
+            warnings.warn(str(e), Warning)
+            errorOccured = True
+        if errorOccured == False: 
+            testXOrig.append(origImgFile)
+            testX    .append(resizedImgFile)
+    pathlib.Path(OUTPUT_LOC).mkdir(parents=True, exist_ok=True)
     if printPreproFigN != 0:
         if verbosity >= 1: print("Saving preprocessed figures:")
         for idx, valX in enumerate(testX[:printPreproFigN]):
             plt.imshow(valX, cmap=plt.cm.binary)
-            plt.title(nameY[testY[idx]], fontsize=24)
-            filenameFig = FIG_LOC + "preprocessed"+str(idx)+"_.png"
+            filenameFig = OUTPUT_LOC + "preprocessed"+str(idx)+"_.png"
             plt.savefig(filenameFig, dpi=100)
             plt.close()
-            if verbosity >= 1: print(" ", idx, nameY[testY[idx]], "\n   ", filenameFig)
+            if verbosity >= 1: print(" "+str(idx)+": "+filenameFig)
 #prediction#####################################################################################
     if verbosity >= 1:
         print("###############################################################MODEL PREDICTION")
@@ -90,27 +102,18 @@ def main():
         optParDict = parDicts["opt"]
         if verbosity >= 1: print("\nOptimal parameters:\n   ", optParDict)
         if verbosity >= 2: print(model.summary())
+        if verbosity >= 3: 
+            for key in parDicts: print(key+":", parDicts[key])
     except OSError or FileNotFoundError:
         print("No trained model is found:\n    ", modelName)
         sys.exit(0)
     except:
         raise
     #data normalization/standardization + data dim requirement
-    testY = np.array(testY)
     testXNorm = np.array([stand2dArray(X) for X in testX])
     if convDimRequired: 
         inputShape = [testXNorm.shape[1], testXNorm.shape[2], 1] #note: needed for conv2D
         testXNorm = testXNorm.reshape(testXNorm.shape[0], *inputShape)
-    #evaluation
-    model.evaluate(x=testXNorm, y=testY)
-    histDF.plot(figsize=(8, 5))
-    plt.title("Learning Performance History")
-    plt.grid("True")
-    plt.gca().set_ylim(0.0, 1.0)
-    filenameFig = FIG_LOC + "-optModel_learningHistory.png"
-    plt.savefig(filenameFig)
-    plt.close()
-    if verbosity >= 1: print("Saving training result/prediction figures:\n    ", filenameFig)
     #prediction figures
     if printPredFigN != 0:
         if verbosity >= 1: print("Saving prediction figures:")
@@ -119,16 +122,10 @@ def main():
         for idx, valX in enumerate(testXOrig[:min(len(testXOrig), printPredFigN)]):
             plt.imshow(valX, cmap=plt.cm.Spectral)
             plt.title("Prediction: "+nameY[predY[idx]], fontsize=24)
-            filenameFig = FIG_LOC + "predicted"+str(idx)+".png"
+            filenameFig = OUTPUT_LOC + "predicted"+str(idx)+".png"
             plt.savefig(filenameFig, dpi=100)
             plt.close()
-            if verbosity >= 1:
-                print(" ", idx, nameY[predY[idx]], nameY[testY[idx]], "\n   ", filenameFig)
-
-
-
-
-
+            if verbosity >= 1: print(" "+str(idx)+"=>"+nameY[predY[idx]]+": "+filenameFig)
 ################################################################################################
 if __name__ == "__main__": main()
 

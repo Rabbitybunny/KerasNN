@@ -30,15 +30,13 @@ from skopt.space import Integer, Real, Categorical
 
 from _GlobalFuncs import *
 OPTITER, OPTACCU, OPTASTD = 0, 0, 0
-EXE_LOC = str(pathlib.Path().absolute())
 ################################################################################################
-DATA_LOC     = EXE_LOC + "/catDogData/"
-TESTDATA_LOC = EXE_LOC + "/catDogData/zTest/"
-FIG_LOC      = EXE_LOC + "/catDogFig/"
-pathlib.Path(FIG_LOC).mkdir(exist_ok=True)
+DATA_LOC     = "./catDogData/"
+TESTDATA_LOC = "./catDogData/zTest/"
+FIG_LOC      = "./catDogFig/"
+RAND_SEED = 1
 def main():
     verbosity = 2
-    np.random.seed(1)
 
     modelName = "catDogConv2D.model"
     trainOn   = True                #False to test the currently saved model
@@ -50,17 +48,17 @@ def main():
     validationRatio = 0.1           #ratio of data for validation
 
     #trainings
-    trainAutoencoderOn    = False
-    autoEpochN            = 30
+    trainAutoencoderOn = False
+    autoEpochN         = 30
    
-    optModelSearchOn      = True
-    optimizationCoreN     = -1      #-1 to use all CPU cores
-    optimizationCallN     = 30      #note: increase to a difference >= 10 when reloading
-    learningEpochN        = 10      #note: equilibrium needed if # of MC dropout layer varies
-    bootstrappingN        = 6
+    optModelSearchOn  = True
+    optimizationCoreN = -1      #-1 to use all CPU cores
+    optimizationCallN = 30      #note: increase to a difference >= 10 when reloading
+    learningEpochN    = 10      #note: equilibrium needed if # of MC dropout layer varies
+    bootstrappingN    = 6
     
-    retrainOptModelOn     = True
-    learningEpochNOpt     = 30
+    retrainOptModelOn = True
+    learningEpochNOpt = 30
     bootstrappingNOpt = 1
 
     #model setup
@@ -99,25 +97,7 @@ def main():
         dims = [learningRate]
         par0 = [1E-3]
     convDimRequired = ("Conv2D" in modelName) or ("RNN" in modelName) or ("ResNet" in modelName)
-    if verbosity >= 1:
-        print("#####################################################################RUN STARTS")
-        print("Loading dataset parameters:")
-        print("  trainOn      :", trainOn)
-        print("  printRawFigN :", printRawFigN)
-        print("  printPredFigN:", printPredFigN)
-        print("  testRatio      :", testRatio)
-        print("  dropRatio      :", dropRatio)
-        print("  validationRatio:", validationRatio)
-        print("Loading training parameters:")
-        print("  trainAutoencoderOn:", trainAutoencoderOn)
-        print("  autoEpochN        :", autoEpochN)
-        print("  optModelSearchOn :", optModelSearchOn)
-        print("  optimizationCallN:", optimizationCallN)
-        print("  learningEpochN   :", learningEpochN )
-        print("  bootstrappingN   : ", bootstrappingN)
-        print("  retrainOptModelOn :", retrainOptModelOn)
-        print("  learningEpochNOpt :", learningEpochNOpt)
-        print("  bootstrappingNOpt :", bootstrappingNOpt)
+    if verbosity >= 1: print("\n####################################################RUN STARTS")
 #dataset########################################################################################
     nameY = ["dog", "cat"]
     inputImageSize = (100, 100)
@@ -160,6 +140,7 @@ def main():
 
     ############################################################################################
     #simulate unlabeled Y's
+    np.random.seed(RAND_SEED)
     inputY = []
     for y in inputYFull:
         if np.random.uniform() < dropRatio: inputY.append(float("NaN"))
@@ -174,6 +155,7 @@ def main():
         inputShape = [inputXNorm.shape[1], inputXNorm.shape[2], 1]     #note: needed for conv2D
         inputXNorm = inputXNorm.reshape(inputXNorm.shape[0], *inputShape)
     #raw figures
+    pathlib.Path(FIG_LOC).mkdir(parents=True, exist_ok=True)
     if printRawFigN > 0:
         if verbosity >= 1: print("Saving preprocessed figures:")
         for idx, valX in enumerate(inputXFull[:printRawFigN]):
@@ -185,6 +167,53 @@ def main():
             if verbosity >= 1:
                 print(" ", idx, nameY[inputYFull[idx]])
                 print("   ", filenameFig)
+    #saving input values
+    trainingInputDict = {}
+    trainingInputDict["RAND_SEED"]      = RAND_SEED
+    trainingInputDict["nameY"]          = nameY
+    trainingInputDict["inputImageSize"] = inputImageSize
+    trainingInputDict["modelName"]     = modelName
+    trainingInputDict["trainOn"]       = trainOn
+    trainingInputDict["printRawFigN"]  = printRawFigN
+    trainingInputDict["printPredFigN"] = printPredFigN
+    trainingInputDict["testRatio"]       = testRatio
+    trainingInputDict["dropRatio"]       = dropRatio
+    trainingInputDict["validationRatio"] = validationRatio
+    trainingInputDict["trainAutoencoderOn"] = trainAutoencoderOn
+    trainingInputDict["autoEpochN"]         = autoEpochN
+    trainingInputDict["optModelSearchOn"]  = optModelSearchOn
+    trainingInputDict["optimizationCoreN"] = optimizationCoreN
+    trainingInputDict["optimizationCallN"] = optimizationCallN
+    trainingInputDict["learningEpochN"]    = learningEpochN
+    trainingInputDict["bootstrappingN"]    = bootstrappingN
+    trainingInputDict["retrainOptModelOn"]  = retrainOptModelOn 
+    trainingInputDict["learningEpochNOpt"]  = learningEpochNOpt
+    trainingInputDict["bootstrappingNOpt"]  = bootstrappingNOpt
+
+    pathlib.Path(modelName).mkdir(parents=True, exist_ok=True)
+    filenameInput = modelName + "/trainingInput.pickle"
+    if os.path.isfile(filenameInput) == False:
+        with open(filenameInput, "wb") as handle:
+            pickle.dump(trainingInputDict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        if verbosity >= 1: print("Saving input training parameters:\n    ", filenameInput)
+    if verbosity >= 1:
+        print("Loading dataset parameters:")
+        print("  trainOn      :", trainOn)
+        print("  printRawFigN :", printRawFigN)
+        print("  printPredFigN:", printPredFigN)
+        print("  testRatio      :", testRatio)
+        print("  dropRatio      :", dropRatio)
+        print("  validationRatio:", validationRatio)
+        print("Loading training parameters:")
+        print("  trainAutoencoderOn:", trainAutoencoderOn)
+        print("  autoEpochN        :", autoEpochN)
+        print("  optModelSearchOn :", optModelSearchOn)
+        print("  optimizationCallN:", optimizationCallN)
+        print("  learningEpochN   :", learningEpochN )
+        print("  bootstrappingN   : ", bootstrappingN)
+        print("  retrainOptModelOn :", retrainOptModelOn)
+        print("  learningEpochNOpt :", learningEpochNOpt)
+        print("  bootstrappingNOpt :", bootstrappingNOpt)
 #autoencoder####################################################################################
     if trainOn == False:
         trainAutoencoderOn = False
@@ -205,7 +234,7 @@ def main():
 
         autoEncoder = buildAutoEncoder(encoder, decoder)
         encodedXuntrained = encoder.predict(validX)
-        tensorboardAutoDir = EXE_LOC + "/" + modelName + "/tensorboardAutoDir/"
+        tensorboardAutoDir = modelName + "/tensorboardAutoDir/"
         tensorboardAutoDir += str(int(time.time())) + "Conv"
         tensorboardAuto = tf.keras.callbacks.TensorBoard(tensorboardAutoDir)
         history = autoEncoder.fit(trainX, trainX, validation_data=(validX, validX),\
@@ -254,7 +283,7 @@ def main():
         fitFunc = fitFuncLambda(modelName, dims, targetN, inputShape, inputXNorm, inputY, \
                                 validationRatio, learningEpochN, bootstrappingN,\
                                 pretrainedLayers=pretrainedLayers, verbosity=verbosity)
-        checkpointPath = EXE_LOC + "/" + modelName + "/checkpoint.pkl"
+        checkpointPath = modelName + "/checkpoint.pkl"
         checkpointSaver = CheckpointSaver(checkpointPath, compress=9, store_objective=False)
         optParDict, eval0 = {}, None
         #restore gp_minimize: remember to delete the .pkl file when changing model
@@ -643,7 +672,7 @@ def fitFuncGen(modelName, pars, dims, targetN, inputShape, inputX, inputY,\
         print("###################################################START MODEL FITTING", OPTITER)
         print("Parameters:", parStr)
     callbacks = []
-    tensorboardModelDir = EXE_LOC + "/" + modelName + "/tensorboardModelDir/"
+    tensorboardModelDir = modelName + "/tensorboardModelDir/"
     tensorboardModelDir += str(int(time.time())) + "--" + parStr
     tensorboard = tf.keras.callbacks.TensorBoard(log_dir=tensorboardModelDir,\
                                                  histogram_freq=0, write_graph=True,\
@@ -693,8 +722,10 @@ def fitFuncGen(modelName, pars, dims, targetN, inputShape, inputX, inputY,\
             parDicts = pickle.load(handle)
         with open(modelName + "/history.pickle", "rb") as handle:
             histDFs = pickle.load(handle)
-    except:
+    except FileNotFoundError:
         warnings.warn("fitFuncGen(): creating new pars.pickle and history.pickle", Warning) 
+    except:
+        raise
     parDicts[str(OPTITER)] = parDict
     if val_accuracy > OPTACCU:
         OPTACCU = 1.0*val_accuracy
