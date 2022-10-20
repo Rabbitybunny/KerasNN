@@ -31,14 +31,14 @@ from skopt.space import Integer, Real, Categorical
 from _GlobalFuncs import *
 OPTITER, OPTACCU, OPTASTD = 0, 0, 0
 ################################################################################################
-DATA_LOC     = "./catDogData/"
+DATA_LOC     = "./catDogData/1000/"
 TESTDATA_LOC = "./catDogData/zTest/"
 FIG_LOC      = "./catDogFig/"
 RAND_SEED = 1
 def main():
     verbosity = 2
 
-    modelName = "catDogConv2D.model"
+    modelName = "catDogResNet50.model"
     trainOn   = True                #False to test the currently saved model
     printRawFigN  = 10
     printPredFigN = 10
@@ -51,7 +51,7 @@ def main():
     trainAutoencoderOn = False
     autoEpochN         = 30
    
-    optModelSearchOn  = True
+    optModelSearchOn  = False
     optimizationCoreN = -1      #-1 to use all CPU cores
     optimizationCallN = 30      #note: increase to a difference >= 10 when reloading
     learningEpochN    = 10      #note: equilibrium needed if # of MC dropout layer varies
@@ -96,11 +96,11 @@ def main():
     elif "ResNet50" in modelName:
         dims = [learningRate]
         par0 = [1E-3]
-    convDimRequired = ("Conv2D" in modelName) or ("RNN" in modelName) or ("ResNet" in modelName)
+    convDimRequired = ("Conv2D" in modelName) or ("RNN" in modelName)#or ("ResNet" in modelName)
     if verbosity >= 1: print("\n####################################################RUN STARTS")
 #dataset########################################################################################
     nameY = ["dog", "cat"]
-    inputImageSize = (100, 100)
+    inputImageSize = (224, 224)
     inputXFull, inputYFull, testX, testY = [], [], [], []
 
     if verbosity >= 1: print("Loading data:")
@@ -112,22 +112,26 @@ def main():
             try:
                 #stackoverflow.com/questions/9131992
                 #github.com/ImageMagick/ImageMagick/discussions/2754, just remove the ~ files
-                origImgFile = cv2.imread(trainPath+"/"+imgName, cv2.IMREAD_GRAYSCALE)
-                resizedImgFile = zeroPadCenterResize(origImgFile, inputImageSize) 
+                origImgFile = cv2.imread(trainPath+"/"+imgName)
             except Exception as e:
                 warnings.warn(str(e), Warning)
                 errorOccured = True
-            if errorOccured == False: dataTrain.append([resizedImgFile, yIter])
+            if (errorOccured == False) and (origImgFile is not None): 
+                resizedImgFile = zeroPadCenterResize(origImgFile, inputImageSize)
+                #resizedImgFile = cv2.cvtColor(resizedImgFile, cv2.COLOR_RGB2GRAY)
+                dataTrain.append([resizedImgFile, yIter])
         testPath = TESTDATA_LOC + "/" + label + "/"
         for imgName in os.listdir(testPath):
             errorOccured, origImgFile, resizedImgFile = False, None, None
             try:
-                origImgFile = cv2.imread(testPath+"/"+imgName, cv2.IMREAD_GRAYSCALE)
-                resizedImgFile = zeroPadCenterResize(origImgFile, inputImageSize) 
+                origImgFile = cv2.imread(testPath+"/"+imgName)
             except Exception as e:
                 warnings.warn(str(e), Warning)
                 errorOccured = True
-            if errorOccured == False: dataTest.append([resizedImgFile, yIter])
+            if (errorOccured == False) and (origImgFile is not None):
+                resizedImgFile = zeroPadCenterResize(origImgFile, inputImageSize)
+                #resizedImgFile = cv2.cvtColor(resizedImgFile, cv2.COLOR_RGB2GRAY)
+                dataTest.append([resizedImgFile, yIter])
     np.random.shuffle(dataTrain)
     for X, Y in dataTrain:
         inputXFull.append(X)

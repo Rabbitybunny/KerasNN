@@ -62,9 +62,10 @@ def dropNaNY(inputX, inputY):
             inputYOutput.append(y)
     return np.array(inputXOutput), np.array(inputYOutput)
 def zeroPadCenterResize(imgFile, outputImgSize):
-    if len(imgFile.shape) >= 3: 
-        raise AssertionError("cropSlideResize(): the function only support grey image")
-    height, width = imgFile.shape                           #note: np.shape has reversed h, w
+    colorN = 1
+    if len(imgFile.shape) == 2:   height, width = imgFile.shape #note: np.shape reverses h, w
+    elif len(imgFile.shape) == 3: height, width, colorN = imgFile.shape
+    else: raise AssertionError("zeroPadCenterResize(): imgFile must have the image format")
     ratioHoW       = 1.0*height/width
     outputRatioHoW = outputImgSize[1]/outputImgSize[0]
 
@@ -80,22 +81,26 @@ def zeroPadCenterResize(imgFile, outputImgSize):
     outputImgFile = cv2.resize(outputImgFile, outputImgSize)
     return outputImgFile
 def cropCenterResize(imgFile, outputImgSize):
-    if len(imgFile.shape) >= 3: 
-        raise AssertionError("cropSlideResize(): the function only support grey image")
-    height, width = imgFile.shape                           #note: np.shape has reversed h, w
+    colorN = None
+    if len(imgFile.shape) == 2:   height, width = imgFile.shape #note: np.shape reverses h, w
+    elif len(imgFile.shape) == 3: height, width, colorN = imgFile.shape
+    else: raise AssertionError("cropCenterResize(): imgFile must have the image format")
     ratioHoW       = 1.0*height/width
     outputRatioHoW = 1.0*outputImgSize[1]/outputImgSize[0]
 
     outputImgFile = np.array(imgFile)
     if ratioHoW > outputRatioHoW:
         cropSize = int((height - outputRatioHoW*width)/2)
-        if cropSize > 0: outputImgFile = np.array(imgFile[cropSize:-cropSize, :])
+        if cropSize > 0: 
+            if colorN is None: outputImgFile = np.array(imgFile[cropSize:-cropSize, :])
+            else:              outputImgFile = np.array(imgFile[:, cropSize:-cropSize, :])
     else:
         cropSize = int((width - (1.0/outputRatioHoW)*height)/2)
-        if cropSize > 0: outputImgFile = np.array(imgFile[:, cropSize:-cropSize])
+        if cropSize > 0: 
+            if colorN is None: outputImgFile = np.array(imgFile[:, cropSize:-cropSize])
+            else:              outputImgFile = np.array(imgFile[:, cropSize:-cropSize, :])
     outputImgFile = cv2.resize(outputImgFile, outputImgSize)
     return outputImgFile
-
 
 ################################################################################################
 if __name__ == "__main__": pass

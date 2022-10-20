@@ -68,13 +68,13 @@ def main():
         try:
             origImgFile = cv2.imread(INPUT_LOC+"/"+imgName)
             origImgFile = cv2.cvtColor(origImgFile, cv2.COLOR_BGR2RGB)
-            resizedImgFile = cv2.cvtColor(origImgFile, cv2.COLOR_RGB2GRAY)
-            resizedImgFile = zeroPadCenterResize(resizedImgFile, inputImageSize) 
-            #resizedImgFile = cropCenterResize(resizedImgFile, inputImageSize) 
         except Exception as e:
             warnings.warn(str(e), Warning)
             errorOccured = True
         if errorOccured == False: 
+            resizedImgFile = cv2.cvtColor(origImgFile, cv2.COLOR_RGB2GRAY)
+            resizedImgFile = zeroPadCenterResize(resizedImgFile, inputImageSize)
+            #resizedImgFile = cropCenterResize(resizedImgFile, inputImageSize) 
             testXOrig.append(origImgFile)
             testX    .append(resizedImgFile)
     pathlib.Path(OUTPUT_LOC).mkdir(parents=True, exist_ok=True)
