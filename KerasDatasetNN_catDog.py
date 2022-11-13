@@ -38,7 +38,7 @@ RAND_SEED = 1
 def main():
     verbosity = 2
 
-    modelName = "catDogResNet50.model"
+    modelName = "catDogConv2D.model"
     trainOn   = True                #False to test the currently saved model
     printRawFigN  = 10
     printPredFigN = 10
@@ -46,6 +46,7 @@ def main():
     testRatio       = 0.1
     dropRatio       = 0.0           #ratio of data to simulate unlabeled Y's
     validationRatio = 0.1           #ratio of data for validation
+    batchSize       = 100
 
     #trainings
     trainAutoencoderOn = False
@@ -101,63 +102,39 @@ def main():
 #dataset########################################################################################
     nameY = ["dog", "cat"]
     inputImageSize = (224, 224)
-    inputXFull, inputYFull, testX, testY = [], [], [], []
-
-    if verbosity >= 1: print("Loading data:")
-    dataTrain, dataTest = [], []
-    for yIter, label in enumerate(nameY):
-        trainPath = DATA_LOC + "/" + label + "/"
-        for imgName in os.listdir(trainPath):
-            errorOccured, origImgFile, resizedImgFile = False, None, None
-            try:
-                #stackoverflow.com/questions/9131992
-                #github.com/ImageMagick/ImageMagick/discussions/2754, just remove the ~ files
-                origImgFile = cv2.imread(trainPath+"/"+imgName)
-            except Exception as e:
-                warnings.warn(str(e), Warning)
-                errorOccured = True
-            if (errorOccured == False) and (origImgFile is not None): 
-                resizedImgFile = zeroPadCenterResize(origImgFile, inputImageSize)
-                #resizedImgFile = cv2.cvtColor(resizedImgFile, cv2.COLOR_RGB2GRAY)
-                dataTrain.append([resizedImgFile, yIter])
-        testPath = TESTDATA_LOC + "/" + label + "/"
-        for imgName in os.listdir(testPath):
-            errorOccured, origImgFile, resizedImgFile = False, None, None
-            try:
-                origImgFile = cv2.imread(testPath+"/"+imgName)
-            except Exception as e:
-                warnings.warn(str(e), Warning)
-                errorOccured = True
-            if (errorOccured == False) and (origImgFile is not None):
-                resizedImgFile = zeroPadCenterResize(origImgFile, inputImageSize)
-                #resizedImgFile = cv2.cvtColor(resizedImgFile, cv2.COLOR_RGB2GRAY)
-                dataTest.append([resizedImgFile, yIter])
-    np.random.shuffle(dataTrain)
-    for X, Y in dataTrain:
-        inputXFull.append(X)
-        inputYFull.append(Y)
-    for X, Y in dataTest:
-        testX.append(X)
-        testY.append(Y)
-    
-
-
+   
+    prepDataLoc = DATA_LOC + ""
+    while prepDataLoc[-1] == "/": prepDataLoc = prepDataLoc[:-1]
+    prepDataLoc = prepDataLoc + "Prep/"
+    if verbosity >= 1: print("Preparing data:")
+    if os.path.isdir(prepDataLoc) == False:
+        if verbosity >= 1: print("  saving data under:", prepDataLoc)
+        for yIter, label in enumerate(nameY):
+            origPath = DATA_LOC    + "/" + label + "/"
+            prepPath = prepDataLoc + "/" + label + "/"
+            pathlib.Path(prepPath).mkdir(parents=True, exist_ok=True)
+            for imgName in os.listdir(origPath):
+                errorOccured, origImgFile, resizedImgFile = False, None, None
+                try:
+                    #stackoverflow.com/questions/9131992
+                    #github.com/ImageMagick/ImageMagick/discussions/2754, just remove the ~files
+                    origImgFile = cv2.imread(origPath+"/"+imgName)
+                except Exception as e:
+                    warnings.warn(str(e), Warning)
+                    errorOccured = True
+                if (errorOccured == False) and (origImgFile is not None): 
+                    resizedImgFile = zeroPadCenterResize(origImgFile, inputImageSize)
+                    #resizedImgFile = cv2.cvtColor(resizedImgFile, cv2.COLOR_RGB2GRAY)
+                    cv2.imwrite(prepPath+imgName.split("/")[-1], resizedImgFile) 
+    elif verbosity >= 1: print("  prepared data already exist:", prepDataLoc)
     ############################################################################################
+    '''
     #simulate unlabeled Y's
     np.random.seed(RAND_SEED)
     inputY = []
     for y in inputYFull:
         if np.random.uniform() < dropRatio: inputY.append(float("NaN"))
         else:                               inputY.append(y)
-    #data normalization/standardization
-    inputY = np.array(inputY)
-    inputXNorm = np.array([stand2dArray(X) for X in inputXFull])
-    targetN    = len(nameY)
-    inputShape = [inputXNorm.shape[1], inputXNorm.shape[2]]
-    #data dim requirement
-    if convDimRequired:
-        inputShape = [inputXNorm.shape[1], inputXNorm.shape[2], 1]     #note: needed for conv2D
-        inputXNorm = inputXNorm.reshape(inputXNorm.shape[0], *inputShape)
     #raw figures
     pathlib.Path(FIG_LOC).mkdir(parents=True, exist_ok=True)
     if printRawFigN > 0:
@@ -171,6 +148,7 @@ def main():
             if verbosity >= 1:
                 print(" ", idx, nameY[inputYFull[idx]])
                 print("   ", filenameFig)
+    '''
     #saving input values
     trainingInputDict = {}
     trainingInputDict["RAND_SEED"]      = RAND_SEED
@@ -183,6 +161,7 @@ def main():
     trainingInputDict["testRatio"]       = testRatio
     trainingInputDict["dropRatio"]       = dropRatio
     trainingInputDict["validationRatio"] = validationRatio
+    trainingInputDict["batchSize"]       = batchSize
     trainingInputDict["trainAutoencoderOn"] = trainAutoencoderOn
     trainingInputDict["autoEpochN"]         = autoEpochN
     trainingInputDict["optModelSearchOn"]  = optModelSearchOn
@@ -208,6 +187,7 @@ def main():
         print("  testRatio      :", testRatio)
         print("  dropRatio      :", dropRatio)
         print("  validationRatio:", validationRatio)
+        print("  batchSize      :", batchSize)
         print("Loading training parameters:")
         print("  trainAutoencoderOn:", trainAutoencoderOn)
         print("  autoEpochN        :", autoEpochN)
@@ -224,12 +204,13 @@ def main():
         optModelSearchOn   = False
         retrainOptModelOn  = False    
     pretrainedLayers = []
+    '''
     if trainAutoencoderOn == True:
         if verbosity >= 1:
             print("####################################################AUTOENCODER PRETRAINING")
         encodedXuntrained = None
-        trainX, validX, trainY, validY = train_test_split(inputXNorm, inputY, test_size=0.1,\
-                                                          shuffle=False)
+        trainX, validX, trainY, validY = train_test_split(inputXNorm, inputY, shuffle=False,\
+                                                          test_size=validationRatio)
         #train encoder, decoder, autoencoder
         encoder = buildEncoderConv(inputShape, regularization="dropout")
         encoderOutputShape = list(encoder.layers[-1].output_shape)
@@ -279,13 +260,13 @@ def main():
             if isinstance(layer, tf.keras.layers.Conv2D):
                 #layer.trainable = False
                 pretrainedLayers.append(layer)
+    '''
 #####searching for optimal model################################################################
-    inputXNorm, inputY = dropNaNY(inputXNorm, inputY)  #dropping out untagged events
     if optModelSearchOn == True:
         if verbosity >= 1:
             print("################################################SEARCHING FOR OPTIMAL MODEL")
-        fitFunc = fitFuncLambda(modelName, dims, targetN, inputShape, inputXNorm, inputY, \
-                                validationRatio, learningEpochN, bootstrappingN,\
+        fitFunc = fitFuncLambda(modelName, dims, prepDataLoc, inputImageSize, validationRation,\
+                                batchSize, learningEpochN, bootstrappingN,\
                                 pretrainedLayers=pretrainedLayers, verbosity=verbosity)
         checkpointPath = modelName + "/checkpoint.pkl"
         checkpointSaver = CheckpointSaver(checkpointPath, compress=9, store_objective=False)
@@ -337,8 +318,8 @@ def main():
             print("Using par0 as the optimized parameters")
         except:
             raise
-        fitFuncOpt = fitFuncLambda(modelName, dims, targetN, inputShape, inputXNorm, inputY,\
-                                   validationRatio, learningEpochNOpt, bootstrappingNOpt,\
+        fitFuncOpt = fitFuncLambda(modelName, dims, prepDataLoc,inputImageSize,validationRatio,\
+                                   batchSize, learningEpochNOpt, bootstrappingNOpt,\
                                    pretrainedLayers=pretrainedLayers, verbosity=verbosity)
         optAccuracy = fitFuncOpt(parOpt)
 #prediction#####################################################################################
@@ -420,6 +401,7 @@ def modelDenseSimple(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     for par, dim in zip(pars, dims): parDict[dim.name] = par
     
     model = tf.keras.models.Sequential()
+    model.add(tf.keras.layers.Rescaling(1.0/255))
     for layer in pretrainedLayers: model.add(cloneLayer(layer))
     if pretrainedLayers == []: model.add(tf.keras.layers.Flatten(input_shape=inputShape))
 
@@ -435,6 +417,7 @@ def modelDense(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     for par, dim in zip(pars, dims): parDict[dim.name] = par
 
     model = tf.keras.models.Sequential()
+    model.add(tf.keras.layers.Rescaling(1.0/255))
     for layer in pretrainedLayers: model.add(cloneLayer(layer))
     if pretrainedLayers == []: model.add(tf.keras.layers.Flatten(input_shape=inputShape))
 
@@ -454,6 +437,7 @@ def modelStandard(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     for par, dim in zip(pars, dims): parDict[dim.name] = par
 
     model = tf.keras.models.Sequential()
+    model.add(tf.keras.layers.Rescaling(1.0/255))
     for layer in pretrainedLayers: model.add(cloneLayer(layer))
     if pretrainedLayers == []: model.add(tf.keras.layers.Flatten(input_shape=inputShape))
 
@@ -484,11 +468,12 @@ def modelConv2D(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     for par, dim in zip(pars, dims): parDict[dim.name] = par
 
     model = tf.keras.models.Sequential()
+    model.add(tf.keras.layers.Rescaling(1.0/255))
     for layer in pretrainedLayers: model.add(cloneLayer(layer))
     if pretrainedLayers == []:
         model.add(tf.keras.layers.Conv2D(convLayerNinit, convFilterNinit, 
                                          activation=parDict["actFunc"],\
-                                         padding="SAME", input_shape=inputShape))
+                                         padding="SAME", input_shape=[*inputShape, 1]))
     for i in range(parDict["convLayerN"]):
         if pow(2, i+1) < min(inputShape[0], inputShape[1]): 
             model.add(tf.keras.layers.MaxPool2D(pool_size=(2, 2)))
@@ -522,7 +507,8 @@ def modelRNN(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     parDict = {}
     for par, dim in zip(pars, dims): parDict[dim.name] = par
 
-    inputZ = tf.keras.layers.Input(inputShape)
+    inputZ = tf.keras.layers.Input([*inputShape, 1])
+    inputZ = tf.keras.layers.Rescaling(1.0/255)(inputZ)
     Z = inputZ + 0
     for layer in pretrainedLayers: Z = layer(Z)
     if pretrainedLayers == []:
@@ -659,8 +645,8 @@ def printTSNE(encodedXInput, knownYInput, nameY, figName, verbosity=1):
     plt.close()
     if verbosity >= 1: print("   ", filenameFig)
 #model fitter###################################################################################
-def fitFuncGen(modelName, pars, dims, targetN, inputShape, inputX, inputY,\
-               valiR, epochN, bootstrappingN, pretrainedLayers=[], verbosity=1):
+def fitFuncGen(modelName, pars, dims, prepDataLoc, imageSize, valiR, batchSize,\
+               epochN, bootstrappingN, pretrainedLayers=[], verbosity=1):
     #############Adjustables#############
     minLearningRate       = pow(10, -6)
     scheduleExpDecayConst = 10
@@ -691,14 +677,16 @@ def fitFuncGen(modelName, pars, dims, targetN, inputShape, inputX, inputY,\
     val_accuracies = []
     for bootSeed in range(bootstrappingN):
         if verbosity >= 1: print("\n############################BOOTSTRAPPING:", bootSeed)
-        trainX, validX, trainY, validY = train_test_split(inputX, inputY, test_size=valiR,\
-                                                          shuffle=True, random_state=bootSeed)
+        #tensorflow.org/tutorials/load_data/images
+        dataTrain, dataVali = tf.keras.utils.image_dataset_from_directory(\
+            prepDataLoc, image_size=imageSize, validation_split=valiR, subset="both",\
+            batch_size=batchSize, seed=bootSeed, shuffle=True)
         tf.random.set_seed(bootSeed)    #for dropout Monte Carlo layers
-        model = buildModel(modelName, pars, dims, targetN, inputShape,\
+        model = buildModel(modelName, pars, dims, len(dataTrain.class_names), imageSize,\
                            pretrainedLayers=pretrainedLayers)
         if verbosity >= 3: print(model.summary())
-        history = model.fit(trainX, trainY, validation_data=(validX, validY),\
-                            epochs=epochN, callbacks=callbacks)
+        history = model.fit(dataTrain, validation_data=dataVali, epochs=epochN,\
+                            callbacks=callbacks)
         val_accuracies.append(history.history["val_accuracy"][-1])
         if verbosity >= 1: print("val_accuracy =", val_accuracies[bootSeed])
         if (OPTASTD > 0) and (val_accuracies[bootSeed] < (OPTACCU - 6*OPTASTD)):
@@ -754,10 +742,10 @@ def fitFuncGen(modelName, pars, dims, targetN, inputShape, inputX, inputY,\
               tensorboardModelDir.replace("tensorboardModelDir/", "tensorboardModelDir/Fin"))
     OPTITER += 1
     return -val_accuracy
-def fitFuncLambda(modelName, dims, targetN, inputShape, trainX, trainY,\
-                  valiR, epochN, bootstrappingN, pretrainedLayers=[], verbosity=1):
-    return lambda pars: fitFuncGen(modelName, pars, dims, targetN, inputShape,trainX,trainY,\
-                                   valiR, epochN, bootstrappingN, pretrainedLayers=[],\
+def fitFuncLambda(modelName, dims, prepDataLoc, imageSize, valiR, batchSize,\
+                  epochN, bootstrappingN, pretrainedLayers=[], verbosity=1):
+    return lambda pars: fitFuncGen(modelName, pars, dims, prepDataLoc, imageSize, valiR,\
+                                   batchSize, epochN, bootstrappingN, pretrainedLayers=[],\
                                    verbosity=verbosity)
 
 ################################################################################################
