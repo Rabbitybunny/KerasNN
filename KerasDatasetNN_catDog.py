@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.ticker import FuncFormatter 
 import pickle
+from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from sklearn.manifold import TSNE
 import tensorflow as tf
@@ -31,16 +32,15 @@ from skopt.space import Integer, Real, Categorical
 from _GlobalFuncs import *
 OPTITER, OPTACCU, OPTASTD = 0, 0, 0
 ################################################################################################
-DATA_LOC     = "./catDogData/1000/"
+DATA_LOC     = "./catDogData/"
 TESTDATA_LOC = "./catDogData/zTest/"
 FIG_LOC      = "./catDogFig/"
 RAND_SEED = 1
 def main():
     verbosity = 2
 
-    modelName = "catDogConv2D.model"
+    modelName = "catDogResNet50.model"
     trainOn   = True                #False to test the currently saved model
-    printRawFigN  = 10
     printPredFigN = 10
     #dataset 
     testRatio       = 0.1
@@ -103,30 +103,32 @@ def main():
     nameY = ["dog", "cat"]
     inputImageSize = (224, 224)
    
-    prepDataLoc = DATA_LOC + ""
-    while prepDataLoc[-1] == "/": prepDataLoc = prepDataLoc[:-1]
-    prepDataLoc = prepDataLoc + "Prep/"
     if verbosity >= 1: print("Preparing data:")
-    if os.path.isdir(prepDataLoc) == False:
-        if verbosity >= 1: print("  saving data under:", prepDataLoc)
-        for yIter, label in enumerate(nameY):
-            origPath = DATA_LOC    + "/" + label + "/"
-            prepPath = prepDataLoc + "/" + label + "/"
+    prepDataLocs = []
+    for dataLoc in [DATA_LOC, TESTDATA_LOC]:
+        prepDataLocs.append(dataLoc + "")
+        while prepDataLocs[-1][-1] == "/": prepDataLocs[-1] = prepDataLocs[-1][:-1]
+        prepDataLocs[-1] = prepDataLocs[-1] + "Prep/"
+        if verbosity >= 1: print("  saving data under:", prepDataLocs[-1])
+        for yIter, label in enumerate(tqdm(nameY)):
+            origPath = DATA_LOC         + "/" + label + "/"
+            prepPath = prepDataLocs[-1] + "/" + label + "/"
             pathlib.Path(prepPath).mkdir(parents=True, exist_ok=True)
-            for imgName in os.listdir(origPath):
-                errorOccured, origImgFile, resizedImgFile = False, None, None
-                try:
-                    #stackoverflow.com/questions/9131992
-                    #github.com/ImageMagick/ImageMagick/discussions/2754, just remove the ~files
-                    origImgFile = cv2.imread(origPath+"/"+imgName)
-                except Exception as e:
-                    warnings.warn(str(e), Warning)
-                    errorOccured = True
-                if (errorOccured == False) and (origImgFile is not None): 
-                    resizedImgFile = zeroPadCenterResize(origImgFile, inputImageSize)
-                    #resizedImgFile = cv2.cvtColor(resizedImgFile, cv2.COLOR_RGB2GRAY)
-                    cv2.imwrite(prepPath+imgName.split("/")[-1], resizedImgFile) 
-    elif verbosity >= 1: print("  prepared data already exist:", prepDataLoc)
+            for imgName in tqdm(os.listdir(origPath)):
+                outImgName = prepPath + imgName.split("/")[-1]
+                if os.path.isfile(outImgName) == False:
+                    errorOccured, origImgFile, resizedImgFile = False, None, None
+                    try:
+                        #stackoverflow.com/questions/9131992
+                        #github.com/ImageMagick/ImageMagick/discussions/2754
+                        origImgFile = cv2.imread(origPath+"/"+imgName)
+                    except Exception as e:
+                        warnings.warn(str(e), Warning)
+                        errorOccured = True
+                    if (errorOccured == False) and (origImgFile is not None): 
+                        resizedImgFile = zeroPadCenterResize(origImgFile, inputImageSize)
+                        #resizedImgFile = cv2.cvtColor(resizedImgFile, cv2.COLOR_RGB2GRAY)
+                        cv2.imwrite(outImgName, resizedImgFile) 
     ############################################################################################
     '''
     #simulate unlabeled Y's
@@ -135,19 +137,6 @@ def main():
     for y in inputYFull:
         if np.random.uniform() < dropRatio: inputY.append(float("NaN"))
         else:                               inputY.append(y)
-    #raw figures
-    pathlib.Path(FIG_LOC).mkdir(parents=True, exist_ok=True)
-    if printRawFigN > 0:
-        if verbosity >= 1: print("Saving preprocessed figures:")
-        for idx, valX in enumerate(inputXFull[:printRawFigN]):
-            plt.imshow(valX, cmap=plt.cm.binary)
-            plt.title(nameY[inputYFull[idx]], fontsize=24)
-            filenameFig = FIG_LOC + "preprocessed"+str(idx)+".png"
-            plt.savefig(filenameFig, dpi=100)
-            plt.close()
-            if verbosity >= 1:
-                print(" ", idx, nameY[inputYFull[idx]])
-                print("   ", filenameFig)
     '''
     #saving input values
     trainingInputDict = {}
@@ -156,7 +145,6 @@ def main():
     trainingInputDict["inputImageSize"] = inputImageSize
     trainingInputDict["modelName"]     = modelName
     trainingInputDict["trainOn"]       = trainOn
-    trainingInputDict["printRawFigN"]  = printRawFigN
     trainingInputDict["printPredFigN"] = printPredFigN
     trainingInputDict["testRatio"]       = testRatio
     trainingInputDict["dropRatio"]       = dropRatio
@@ -182,7 +170,6 @@ def main():
     if verbosity >= 1:
         print("Loading dataset parameters:")
         print("  trainOn      :", trainOn)
-        print("  printRawFigN :", printRawFigN)
         print("  printPredFigN:", printPredFigN)
         print("  testRatio      :", testRatio)
         print("  dropRatio      :", dropRatio)
@@ -265,8 +252,8 @@ def main():
     if optModelSearchOn == True:
         if verbosity >= 1:
             print("################################################SEARCHING FOR OPTIMAL MODEL")
-        fitFunc = fitFuncLambda(modelName, dims, prepDataLoc, inputImageSize, validationRation,\
-                                batchSize, learningEpochN, bootstrappingN,\
+        fitFunc = fitFuncLambda(modelName, dims, prepDataLocs[0], inputImageSize,\
+                                validationRatio, batchSize, learningEpochN, bootstrappingN,\
                                 pretrainedLayers=pretrainedLayers, verbosity=verbosity)
         checkpointPath = modelName + "/checkpoint.pkl"
         checkpointSaver = CheckpointSaver(checkpointPath, compress=9, store_objective=False)
@@ -318,9 +305,10 @@ def main():
             print("Using par0 as the optimized parameters")
         except:
             raise
-        fitFuncOpt = fitFuncLambda(modelName, dims, prepDataLoc,inputImageSize,validationRatio,\
-                                   batchSize, learningEpochNOpt, bootstrappingNOpt,\
-                                   pretrainedLayers=pretrainedLayers, verbosity=verbosity)
+        fitFuncOpt = fitFuncLambda(modelName, dims, prepDataLocs[0], inputImageSize,\
+                                   validationRatio, batchSize, learningEpochNOpt,\
+                                   bootstrappingNOpt, pretrainedLayers=pretrainedLayers,\
+                                   verbosity=verbosity)
         optAccuracy = fitFuncOpt(parOpt)
 #prediction#####################################################################################
     if verbosity >= 1:
@@ -346,8 +334,10 @@ def main():
     testY = np.array(testY)
     testXNorm = np.array([stand2dArray(X) for X in testX])
     if convDimRequired: testXNorm = testXNorm.reshape(testXNorm.shape[0], *inputShape)
+
+    dataTest = tf.keras.utils.image_dataset_from_directory(prepDataLocs[1],image_size=imageSize)
     #evaluation
-    model.evaluate(x=testXNorm, y=testY)
+    model.evaluate(dataTest)
     histDF.plot(figsize=(8, 5))
     plt.title("Learning Performance History")
     plt.grid("True")
@@ -358,8 +348,9 @@ def main():
     if verbosity >= 1: print("Saving training result/prediction figures:\n    ", filenameFig)
     #prediction figures
     if printPredFigN != 0:
-        predValY = model.predict(testXNorm)
+        predValY = model.predict(dataTest[0])
         predY = np.argmax(predValY, axis=-1)
+        '''
         for idx, valX in enumerate(testX[:min(len(testX), printPredFigN)]):    
             plt.imshow(valX, cmap=plt.cm.binary)
             plt.title("Prediction: "+nameY[predY[idx]], fontsize=24)
@@ -369,7 +360,7 @@ def main():
             if verbosity >= 1:
                 print(" ", idx, nameY[predY[idx]], nameY[testY[idx]])
                 print("   ", filenameFig)
-
+        '''
 
 
 
