@@ -22,8 +22,8 @@ import tensorflow.keras.backend as K
 #https://github.com/keras-team/keras/issues/3945
 #https://stackoverflow.com/questions/64118331
 K.image_data_format();
-#https://towardsdatascience.com/bayesian-hyper-parameter-optimization-neural-networks
-#-tensorflow-facies-prediction-example-f9c48d21f795
+#https://towardsdatascience.com/bayesian-hyper-parameter-optimization-neural-networks-
+#  tensorflow-facies-prediction-example-f9c48d21f795
 from skopt import gp_minimize
 from skopt.callbacks import CheckpointSaver
 from skopt import load as load_gp_minimize
@@ -32,10 +32,11 @@ from skopt.space import Integer, Real, Categorical
 from _GlobalFuncs import *
 OPTITER, OPTACCU, OPTASTD = 0, 0, 0
 ################################################################################################
-DATA_LOC     = "./catDogData/"
+DATA_LOC     = "./catDogData/full"
 TESTDATA_LOC = "./catDogData/zTest/"
 FIG_LOC      = "./catDogFig/"
-RAND_SEED = 1
+IMAGE_SIZE = (224, 224)
+RAND_SEED  = 1
 def main():
     verbosity = 2
 
@@ -52,7 +53,7 @@ def main():
     trainAutoencoderOn = False
     autoEpochN         = 30
    
-    optModelSearchOn  = False
+    optModelSearchOn  = True
     optimizationCoreN = -1      #-1 to use all CPU cores
     optimizationCallN = 30      #note: increase to a difference >= 10 when reloading
     learningEpochN    = 10      #note: equilibrium needed if # of MC dropout layer varies
@@ -95,23 +96,26 @@ def main():
         dims = [learningRate]
         par0 = [1E-3]
     elif "ResNet50" in modelName:
+        optModelSearchOn = False 
         dims = [learningRate]
         par0 = [1E-3]
-    convDimRequired = ("Conv2D" in modelName) or ("RNN" in modelName)#or ("ResNet" in modelName)
     if verbosity >= 1: print("\n####################################################RUN STARTS")
 #dataset########################################################################################
-    nameY = ["dog", "cat"]
-    inputImageSize = (224, 224)
-   
     if verbosity >= 1: print("Preparing data:")
+    inputImageSize = IMAGE_SIZE
+    nameY = []
     prepDataLocs = []
     for dataLoc in [DATA_LOC, TESTDATA_LOC]:
         prepDataLocs.append(dataLoc + "")
         while prepDataLocs[-1][-1] == "/": prepDataLocs[-1] = prepDataLocs[-1][:-1]
         prepDataLocs[-1] = prepDataLocs[-1] + "Prep/"
         if verbosity >= 1: print("  saving data under:", prepDataLocs[-1])
+        if len(nameY) == 0: 
+            for _, directories, _ in os.walk(dataLoc):
+                for directory in directories:
+                    nameY.append(directory)
         for yIter, label in enumerate(tqdm(nameY)):
-            origPath = DATA_LOC         + "/" + label + "/"
+            origPath = dataLoc          + "/" + label + "/"
             prepPath = prepDataLocs[-1] + "/" + label + "/"
             pathlib.Path(prepPath).mkdir(parents=True, exist_ok=True)
             for imgName in tqdm(os.listdir(origPath)):
@@ -330,37 +334,62 @@ def main():
         sys.exit(0)
     except:
         raise
-    #data normalization/standardization + data dim requirement
-    testY = np.array(testY)
-    testXNorm = np.array([stand2dArray(X) for X in testX])
-    if convDimRequired: testXNorm = testXNorm.reshape(testXNorm.shape[0], *inputShape)
-
-    dataTest = tf.keras.utils.image_dataset_from_directory(prepDataLocs[1],image_size=imageSize)
-    #evaluation
-    model.evaluate(dataTest)
+    #loading test data
+    #plotting
     histDF.plot(figsize=(8, 5))
     plt.title("Learning Performance History")
     plt.grid("True")
     plt.gca().set_ylim(0.0, 1.0)
-    filenameFig = FIG_LOC + "-optModel_learningHistory.png"
+    filenameFig = FIG_LOC + "_optModel_learningHistory.png"
     plt.savefig(filenameFig)
     plt.close()
     if verbosity >= 1: print("Saving training result/prediction figures:\n    ", filenameFig)
     #prediction figures
+    dataTest = tf.keras.utils.image_dataset_from_directory(\
+        prepDataLocs[1], image_size=inputImageSize, shuffle=False)
+    if nameY != dataTest.class_names:
+        raise AssertionError("main(): make sure the labels in the train/test directories match")
+    testPaths = dataTest.file_paths
+    testIdx = 0
+    if verbosity >= 1: print("  test loss, test acc:", model.evaluate(dataTest))
     if printPredFigN != 0:
-        predValY = model.predict(dataTest[0])
-        predY = np.argmax(predValY, axis=-1)
-        '''
-        for idx, valX in enumerate(testX[:min(len(testX), printPredFigN)]):    
-            plt.imshow(valX, cmap=plt.cm.binary)
-            plt.title("Prediction: "+nameY[predY[idx]], fontsize=24)
-            filenameFig = FIG_LOC + "predicted"+str(idx)+".png"
+        testXs, testYs = next(iter(dataTest))
+        testYs = testYs.numpy()
+        predYweights = model.predict(testXs)
+        predYs = [np.argmax(predYweight) for predYweight in predYweights] 
+        for testY, predY in zip(testYs, predYs):
+            testXorig = cv2.imread(testPaths[testIdx].replace("Pred", ""))
+            testXorig = cv2.cvtColor(testXorig, cv2.COLOR_BGR2RGB)
+            plt.imshow(testXorig, cmap=plt.cm.Spectral)
+            plt.title("Prediction: "+nameY[predY], fontsize=24)
+            filenameFig = FIG_LOC + "predicted"+str(testIdx)+".png"
             plt.savefig(filenameFig, dpi=100)
             plt.close()
+            testIdx += 1
             if verbosity >= 1:
-                print(" ", idx, nameY[predY[idx]], nameY[testY[idx]])
+                print(" ", testIdx, nameY[predY], nameY[testY])
                 print("   ", filenameFig)
-        '''
+            if testIdx > printPredFigN: break
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -392,7 +421,7 @@ def modelDenseSimple(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     for par, dim in zip(pars, dims): parDict[dim.name] = par
     
     model = tf.keras.models.Sequential()
-    model.add(tf.keras.layers.Rescaling(1.0/255))
+    model.add(tf.keras.layers.Rescaling(1.0/127, offset=-1))
     for layer in pretrainedLayers: model.add(cloneLayer(layer))
     if pretrainedLayers == []: model.add(tf.keras.layers.Flatten(input_shape=inputShape))
 
@@ -408,7 +437,7 @@ def modelDense(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     for par, dim in zip(pars, dims): parDict[dim.name] = par
 
     model = tf.keras.models.Sequential()
-    model.add(tf.keras.layers.Rescaling(1.0/255))
+    model.add(tf.keras.layers.Rescaling(1.0/127, offset=-1))
     for layer in pretrainedLayers: model.add(cloneLayer(layer))
     if pretrainedLayers == []: model.add(tf.keras.layers.Flatten(input_shape=inputShape))
 
@@ -428,7 +457,7 @@ def modelStandard(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     for par, dim in zip(pars, dims): parDict[dim.name] = par
 
     model = tf.keras.models.Sequential()
-    model.add(tf.keras.layers.Rescaling(1.0/255))
+    model.add(tf.keras.layers.Rescaling(1.0/127, offset=-1))
     for layer in pretrainedLayers: model.add(cloneLayer(layer))
     if pretrainedLayers == []: model.add(tf.keras.layers.Flatten(input_shape=inputShape))
 
@@ -446,6 +475,8 @@ def modelStandard(pars, dims, targetN, inputShape, pretrainedLayers=[]):
                   loss=tf.keras.losses.sparse_categorical_crossentropy, metrics=["accuracy"])
     return model
 #https://stats.stackexchange.com/questions/240305
+#https://machinelearningmastery.com/
+#  image-augmentation-with-keras-preprocessing-layers-and-tf-image/
 def modelConv2D(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     #dims: learningRate, convLayerN, convFilterN, denseLayerN, denseNeuronN, actFunc, initFunc
     #############Adjustables#############
@@ -459,7 +490,9 @@ def modelConv2D(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     for par, dim in zip(pars, dims): parDict[dim.name] = par
 
     model = tf.keras.models.Sequential()
-    model.add(tf.keras.layers.Rescaling(1.0/255))
+    model.add(tf.keras.layers.RandomFlip("horizontal_and_vertical"))
+    model.add(tf.keras.layers.RandomRotation(0.2))
+    model.add(tf.keras.layers.Rescaling(1.0/127, offset=-1))
     for layer in pretrainedLayers: model.add(cloneLayer(layer))
     if pretrainedLayers == []:
         model.add(tf.keras.layers.Conv2D(convLayerNinit, convFilterNinit, 
@@ -499,7 +532,9 @@ def modelRNN(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     for par, dim in zip(pars, dims): parDict[dim.name] = par
 
     inputZ = tf.keras.layers.Input([*inputShape, 1])
-    inputZ = tf.keras.layers.Rescaling(1.0/255)(inputZ)
+    inputZ = tf.keras.layers.RandomFlip("horizontal_and_vertical")(inputZ)
+    inputZ = tf.keras.layers.RandomRotation(0.2)(inputZ)
+    inputZ = tf.keras.layers.Rescaling(1.0/127, offset=-1)(inputZ)
     Z = inputZ + 0
     for layer in pretrainedLayers: Z = layer(Z)
     if pretrainedLayers == []:
@@ -672,9 +707,12 @@ def fitFuncGen(modelName, pars, dims, prepDataLoc, imageSize, valiR, batchSize,\
         dataTrain, dataVali = tf.keras.utils.image_dataset_from_directory(\
             prepDataLoc, image_size=imageSize, validation_split=valiR, subset="both",\
             batch_size=batchSize, seed=bootSeed, shuffle=True)
+        lenY = len(dataTrain.class_names)
+        AUTOTUNE = tf.data.AUTOTUNE
+        dataTrain = dataTrain.cache().prefetch(buffer_size=AUTOTUNE)    
+        dataVali  = dataVali .cache().prefetch(buffer_size=AUTOTUNE)
         tf.random.set_seed(bootSeed)    #for dropout Monte Carlo layers
-        model = buildModel(modelName, pars, dims, len(dataTrain.class_names), imageSize,\
-                           pretrainedLayers=pretrainedLayers)
+        model = buildModel(modelName,pars,dims,lenY,imageSize,pretrainedLayers=pretrainedLayers)
         if verbosity >= 3: print(model.summary())
         history = model.fit(dataTrain, validation_data=dataVali, epochs=epochN,\
                             callbacks=callbacks)
