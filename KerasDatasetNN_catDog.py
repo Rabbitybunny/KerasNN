@@ -362,13 +362,11 @@ def main():
             testXorig = cv2.cvtColor(testXorig, cv2.COLOR_BGR2RGB)
             plt.imshow(testXorig, cmap=plt.cm.Spectral)
             plt.title("Prediction: "+nameY[predY], fontsize=24)
-            filenameFig = FIG_LOC + "predicted"+str(testIdx)+".png"
+            filenameFig = FIG_LOC + "predicted" + str(testIdx) + ".png"
             plt.savefig(filenameFig, dpi=100)
             plt.close()
             testIdx += 1
-            if verbosity >= 1:
-                print(" ", testIdx, nameY[predY], nameY[testY])
-                print("   ", filenameFig)
+            if verbosity >= 1: print(" ", testIdx,nameY[predY],nameY[testY],"\n   ",filenameFig)
             if testIdx > printPredFigN: break
 
 
