@@ -31,14 +31,14 @@ from skopt.space import Integer, Real, Categorical
 from _GlobalFuncs import *
 OPTITER, OPTACCU, OPTASTD = 0, 0, 0
 ################################################################################################
-DATA_LOC     = "./catDogData/1000/"
+DATA_LOC     = "./catDogData/full/"
 TESTDATA_LOC = "./catDogData/zTest/"
 FIG_LOC      = "./catDogFig/"
 RAND_SEED = 1
 def main():
     verbosity = 2
 
-    modelName = "catDogResNet50.model"
+    modelName = "catDogConv2D.model"
     trainOn   = True                #False to test the currently saved model
     printRawFigN  = 10
     printPredFigN = 10
@@ -100,7 +100,7 @@ def main():
     if verbosity >= 1: print("\n####################################################RUN STARTS")
 #dataset########################################################################################
     nameY = ["dog", "cat"]
-    inputImageSize = (224, 224)
+    inputImageSize = (128, 128)     #(224, 224) for ResNet
     inputXFull, inputYFull, testX, testY = [], [], [], []
 
     if verbosity >= 1: print("Loading data:")
@@ -118,7 +118,7 @@ def main():
                 errorOccured = True
             if (errorOccured == False) and (origImgFile is not None): 
                 resizedImgFile = zeroPadCenterResize(origImgFile, inputImageSize)
-                #resizedImgFile = cv2.cvtColor(resizedImgFile, cv2.COLOR_RGB2GRAY)
+                resizedImgFile = cv2.cvtColor(resizedImgFile, cv2.COLOR_RGB2GRAY)
                 dataTrain.append([resizedImgFile, yIter])
         testPath = TESTDATA_LOC + "/" + label + "/"
         for imgName in os.listdir(testPath):
@@ -130,7 +130,7 @@ def main():
                 errorOccured = True
             if (errorOccured == False) and (origImgFile is not None):
                 resizedImgFile = zeroPadCenterResize(origImgFile, inputImageSize)
-                #resizedImgFile = cv2.cvtColor(resizedImgFile, cv2.COLOR_RGB2GRAY)
+                resizedImgFile = cv2.cvtColor(resizedImgFile, cv2.COLOR_RGB2GRAY)
                 dataTest.append([resizedImgFile, yIter])
     np.random.shuffle(dataTrain)
     for X, Y in dataTrain:

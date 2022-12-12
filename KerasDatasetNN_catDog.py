@@ -35,19 +35,19 @@ OPTITER, OPTACCU, OPTASTD = 0, 0, 0
 DATA_LOC     = "./catDogData/full"
 TESTDATA_LOC = "./catDogData/zTest/"
 FIG_LOC      = "./catDogFig/"
-IMAGE_SIZE = (224, 224)
+IMAGE_SIZE = (128, 128)         #(224, 224) for ResNet
 RAND_SEED  = 1
 def main():
     verbosity = 2
 
-    modelName = "catDogResNet50.model"
+    modelName = "catDogConv2D.model"
     trainOn   = True                #False to test the currently saved model
     printPredFigN = 10
     #dataset 
     testRatio       = 0.1
     dropRatio       = 0.0           #ratio of data to simulate unlabeled Y's
     validationRatio = 0.1           #ratio of data for validation
-    batchSize       = 100
+    batchSize       = 32            #32 is good according to the ref
 
     #trainings
     trainAutoencoderOn = False
@@ -130,9 +130,29 @@ def main():
                         warnings.warn(str(e), Warning)
                         errorOccured = True
                     if (errorOccured == False) and (origImgFile is not None): 
+                        '''
+                        ###original
                         resizedImgFile = zeroPadCenterResize(origImgFile, inputImageSize)
                         #resizedImgFile = cv2.cvtColor(resizedImgFile, cv2.COLOR_RGB2GRAY)
                         cv2.imwrite(outImgName, resizedImgFile) 
+                        '''
+                        ###ignore small images
+                        if (origImgFile.shape[0] > IMAGE_SIZE[0]) and\
+                           (origImgFile.shape[1] > IMAGE_SIZE[1]): 
+                            resizedImgFile = zeroPadCenterResize(origImgFile, inputImageSize)
+                            cv2.imwrite(outImgName, resizedImgFile) 
+                        '''
+                        ###different scales of each image
+                        scaleArr = [1.0, 0.75, 0.5, 0.25]
+                        for scaleIdx, resizeScale in enumerate(scaleArr):
+                            rescaledSize = (np.array(inputImageSize)*resizeScale).astype(int) 
+                            resizedImgFile = zeroPadCenterResize(origImgFile,    rescaledSize)
+                            resizedImgFile = zeroPadCenterResize(resizedImgFile, inputImageSize)
+                            inFileName  = outImgName.split("/")[-1]
+                            outFileName = inFileName.replace(".", ("_"*scaleIdx)+".")
+                            outputName = outImgName.replace(inFileName, outFileName)
+                            cv2.imwrite(outputName, resizedImgFile)
+                        '''
     ############################################################################################
     '''
     #simulate unlabeled Y's
