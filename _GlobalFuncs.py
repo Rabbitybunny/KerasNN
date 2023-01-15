@@ -31,10 +31,12 @@ from skopt.space import Integer, Real, Categorical
 
 
 #model fitter###################################################################################
-def learningRateFunc(epoch, initLR, minLR, decayC):
-    return initLR*pow(0.1, 1.0*epoch/decayC) + minLR
-def schedulerLambda(initLR, minLR, decayC):
-    return lambda epoch: learningRateFunc(epoch, initLR, minLR, decayC)
+def learningRateFunc(epoch, initLR, minLR, decayC, epochShift=None):
+    if epochShift == None: epochShift = 0
+    return initLR*pow(0.1, 1.0*(epoch+epochShift)/decayC) + minLR
+def schedulerLambda(initLR, minLR, decayC, epochShift=None):
+    if epochShift == None: epochShift = 0
+    return lambda epoch: learningRateFunc(epoch, initLR, minLR, decayC, epochShift=epochShift)
 def cloneLayer(layer):
     config = layer.get_config()
     weights = layer.get_weights()

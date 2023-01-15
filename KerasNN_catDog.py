@@ -51,7 +51,7 @@ def main():
     trainAutoencoderOn = False
     autoEpochN         = 30
    
-    optModelSearchOn  = False
+    optModelSearchOn  = True
     optimizationCoreN = -1      #-1 to use all CPU cores
     optimizationCallN = 30      #note: increase to a difference >= 10 when reloading
     learningEpochN    = 10      #note: equilibrium needed if # of MC dropout layer varies
@@ -100,7 +100,7 @@ def main():
     if verbosity >= 1: print("\n####################################################RUN STARTS")
 #dataset########################################################################################
     nameY = ["dog", "cat"]
-    inputImageSize = (128, 128)     #(224, 224) for ResNet
+    inputImageSize = (64, 64)     #(224, 224) for ResNet
     inputXFull, inputYFull, testX, testY = [], [], [], []
 
     if verbosity >= 1: print("Loading data:")

@@ -1,4 +1,4 @@
-import sys, os, pathlib, time, math
+import os, sys, pathlib, time, re, glob, math, copy
 import warnings
 def warning_on_one_line(message, category, filename, lineno, file=None, line=None):
     return '%s:%s: %s: %s\n' % (filename, lineno, category.__name__, message)
@@ -35,10 +35,13 @@ OPTITER, OPTACCU, OPTASTD = 0, 0, 0
 DATA_LOC     = "./catDogData/full"
 TESTDATA_LOC = "./catDogData/zTest/"
 FIG_LOC      = "./catDogFig/"
-IMAGE_SIZE = (128, 128)         #(224, 224) for ResNet
+IMAGE_SIZE = (4, 4)#(224, 224)         #(224, 224) for ResNet
 RAND_SEED  = 1
+SAVE_GM_MINIMIZE_CHECKPOINT = True
+SAVE_BOOTSTRAP_CHECKPOINT   = True
+SAVE_EPOCH_CHECKPOINT       = True
 def main():
-    verbosity = 2
+    verbosity = 3
 
     modelName = "catDogConv2D.model"
     trainOn   = True                #False to test the currently saved model
@@ -55,7 +58,7 @@ def main():
    
     optModelSearchOn  = True
     optimizationCoreN = -1      #-1 to use all CPU cores
-    optimizationCallN = 30      #note: increase to a difference >= 10 when reloading
+    optimizationCallN = 25      #note: increase to a difference >= 10 when reloading
     learningEpochN    = 10      #note: equilibrium needed if # of MC dropout layer varies
     bootstrappingN    = 6
     
@@ -279,15 +282,20 @@ def main():
         fitFunc = fitFuncLambda(modelName, dims, prepDataLocs[0], inputImageSize,\
                                 validationRatio, batchSize, learningEpochN, bootstrappingN,\
                                 pretrainedLayers=pretrainedLayers, verbosity=verbosity)
-        checkpointPath = modelName + "/checkpoint.pkl"
-        checkpointSaver = CheckpointSaver(checkpointPath, compress=9, store_objective=False)
+        callbacks = []
+        minCheckpointPath = modelName + "/checkpoint_gp_minimize.pkl"
+        if SAVE_GM_MINIMIZE_CHECKPOINT == True:
+            minCheckpointSaver = CheckpointSaver(minCheckpointPath, compress=9,\
+                                                 store_objective=False)
+            callbacks.append(minCheckpointSaver)
         optParDict, eval0 = {}, None
         #restore gp_minimize: remember to delete the .pkl file when changing model
         global OPTITER, OPTACCU, OPTASTD
         try:
-            restoredOpt = load_gp_minimize(checkpointPath)
+            restoredOpt = load_gp_minimize(minCheckpointPath)
             par0, eval0 = restoredOpt.x_iters, restoredOpt.func_vals
-            print("Reading the checkpoint file:\n    ", checkpointPath)
+            if verbosity >= 1:
+                print("Reading the gp_minimize checkpoint file:\n    ", minCheckpointPath)
             OPTITER = len(eval0)
             optimizationCallN -= (OPTITER + 1)
             parDicts = {}
@@ -300,17 +308,19 @@ def main():
                 model = tf.keras.models.load_model(modelName)
                 print(model.summary())
                 print("Parameters:\n   ", optParDict)
-            print("Current optimal validation accuracy:")
-            print("   ", OPTACCU, "+/-", (OPTASTD if (OPTASTD > 0) else "NA"))
+            if verbosity >= 1:
+                print("Current optimal validation accuracy:")
+                print("   ", OPTACCU, "+/-", (OPTASTD if (OPTASTD > 0) else "NA"))
         except FileNotFoundError:
-            print("Saving checkpoint file:\n    ", checkpointPath)
+            if (SAVE_GM_MINIMIZE_CHECKPOINT == True) and (verbosity >= 1):
+                print("Saving checkpoint enabled for gp_minimize:\n    ", minCheckpointPath)
         except:
             raise
         #main optimization
         if optimizationCallN > 0:
             result = gp_minimize(func=fitFunc, dimensions=dims, x0=par0,y0=eval0,acq_func="EI",\
                                  n_jobs=optimizationCoreN, n_calls=optimizationCallN,\
-                                 callback=[checkpointSaver])
+                                 callback=callbacks)
 #retrain optimal model##########################################################################
     if retrainOptModelOn == True:
         if verbosity >= 1:
@@ -508,8 +518,8 @@ def modelConv2D(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     for par, dim in zip(pars, dims): parDict[dim.name] = par
 
     model = tf.keras.models.Sequential()
-    model.add(tf.keras.layers.RandomFlip("horizontal_and_vertical"))
-    model.add(tf.keras.layers.RandomRotation(0.2))
+    #model.add(tf.keras.layers.RandomFlip("horizontal_and_vertical"))
+    #model.add(tf.keras.layers.RandomRotation(0.2))
     model.add(tf.keras.layers.Rescaling(1.0/127, offset=-1))
     for layer in pretrainedLayers: model.add(cloneLayer(layer))
     if pretrainedLayers == []:
@@ -706,21 +716,32 @@ def fitFuncGen(modelName, pars, dims, prepDataLoc, imageSize, valiR, batchSize,\
         print("###################################################START MODEL FITTING", OPTITER)
         print("Parameters:", parStr)
     callbacks = []
+    epochCheckpointPath = modelName + "/checkpoint_epoch.{epoch:02d}-{val_loss:.4f}.h5"
+    if SAVE_EPOCH_CHECKPOINT == True:
+        epochCheckpointSaver = tf.keras.callbacks.ModelCheckpoint(filepath=epochCheckpointPath,\
+                                                                  save_weights_only=True,\
+                                                                  verbose=verbosity)
+        callbacks.append(epochCheckpointSaver)
     tensorboardModelDir = modelName + "/tensorboardModelDir/"
     tensorboardModelDir += str(int(time.time())) + "--" + parStr
     tensorboard = tf.keras.callbacks.TensorBoard(log_dir=tensorboardModelDir,\
                                                  histogram_freq=0, write_graph=True,\
                                                  write_grads=False, write_images=False)
     callbacks.append(tensorboard)
-    if "learningRate" in parDict.keys():
-        schedulerFunc = schedulerLambda(parDict["learningRate"], minLearningRate,\
-                                        scheduleExpDecayConst)
-        scheduler = tf.keras.callbacks.LearningRateScheduler(schedulerFunc)
-        callbacks.append(scheduler)
-    
+
     val_accuracies = []
+    bootCheckpointPath = modelName + "/checkpoint_boot.pickle"
+    if SAVE_BOOTSTRAP_CHECKPOINT == True:
+        if os.path.isfile(bootCheckpointPath) == True:
+            if verbosity >= 1: 
+                print("Reading the bootstrap checkpoint file:\n    ", bootCheckpointPath)
+            with open(bootCheckpointPath, "rb") as handle:
+                val_accuracies = pickle.load(handle)
+        elif verbosity >= 1:
+            print("Saving checkpoint enabled for bootstrap:\n    ", bootCheckpointPath) 
     for bootSeed in range(bootstrappingN):
         if verbosity >= 1: print("\n############################BOOTSTRAPPING:", bootSeed)
+        if bootSeed < len(val_accuracies): continue
         #tensorflow.org/tutorials/load_data/images
         dataTrain, dataVali = tf.keras.utils.image_dataset_from_directory(\
             prepDataLoc, image_size=imageSize, validation_split=valiR, subset="both",\
@@ -731,17 +752,50 @@ def fitFuncGen(modelName, pars, dims, prepDataLoc, imageSize, valiR, batchSize,\
         dataVali  = dataVali .cache().prefetch(buffer_size=AUTOTUNE)
         tf.random.set_seed(bootSeed)    #for dropout Monte Carlo layers
         model = buildModel(modelName,pars,dims,lenY,imageSize,pretrainedLayers=pretrainedLayers)
+        input_shape = None
+        for input_shape_in_data, _ in dataTrain:
+            input_shape = input_shape_in_data.shape
+            break
+        model.build(input_shape)
         if verbosity >= 3: print(model.summary())
-        history = model.fit(dataTrain, validation_data=dataVali, epochs=epochN,\
-                            callbacks=callbacks)
+        checkpoint_epoch_files = glob.glob(modelName + "/checkpoint_epoch*")
+        if SAVE_EPOCH_CHECKPOINT == True:
+            checkpoint_epoch_files.sort(key=lambda Lfunc: int(re.sub("\D", "", Lfunc)))
+            if len(checkpoint_epoch_files) != 0:
+                if verbosity >= 1: 
+                    print("Reading the epoch checkpoint file:\n    ",checkpoint_epoch_files[-1])
+                model.load_weights(checkpoint_epoch_files[-1])
+                for checkpoint_epoch_file in glob.glob(modelName + "/checkpoint_epoch*"): 
+                    os.remove(checkpoint_epoch_file)
+            elif verbosity >= 1:
+               print("Saving checkpoint enabled for epoch:\n    ", epochCheckpointPath) 
+        callbacks_final = [*callbacks]
+        if "learningRate" in parDict.keys():
+            schedulerFunc = schedulerLambda(parDict["learningRate"], minLearningRate,\
+                                            scheduleExpDecayConst,\
+                                            epochShift=len(checkpoint_epoch_files))
+            scheduler = tf.keras.callbacks.LearningRateScheduler(schedulerFunc)
+            callbacks_final.append(scheduler)
+        ########################################################################################
+        history = model.fit(dataTrain, validation_data=dataVali,\
+                            epochs=(epochN-len(checkpoint_epoch_files)),\
+                            callbacks=callbacks_final)
+        ########################################################################################
+        if SAVE_EPOCH_CHECKPOINT == True:
+            for checkpoint_epoch_file in glob.glob(modelName + "/checkpoint_epoch*"): 
+                os.remove(checkpoint_epoch_file)
         val_accuracies.append(history.history["val_accuracy"][-1])
         if verbosity >= 1: print("val_accuracy =", val_accuracies[bootSeed])
+        if SAVE_BOOTSTRAP_CHECKPOINT == True:
+            with open(bootCheckpointPath, "wb") as handle:
+                pickle.dump(val_accuracies, handle, protocol=pickle.HIGHEST_PROTOCOL)
         if (OPTASTD > 0) and (val_accuracies[bootSeed] < (OPTACCU - 6*OPTASTD)):
             if verbosity >= 1: 
                 print("WARNING: 6-sigma smaller than the current optimal validation accuracy:")
                 print("   ", OPTACCU, "-", "6*" +str(OPTASTD))
                 print("Terminating the bootstrapping...\n")
             break
+    if os.path.isfile(bootCheckpointPath) == True: os.remove(bootCheckpointPath)
     val_accuracy = np.mean(val_accuracies)
     val_accu_std = 0.0
     if len(val_accuracies) >= 2: val_accu_std = np.std(val_accuracies, ddof=1)
@@ -765,23 +819,21 @@ def fitFuncGen(modelName, pars, dims, prepDataLoc, imageSize, valiR, batchSize,\
         warnings.warn("fitFuncGen(): creating new pars.pickle and history.pickle", Warning) 
     except:
         raise
-    parDicts[str(OPTITER)] = parDict
+    histDF = pd.DataFrame(history.history)
+    histDFs[str(OPTITER)] = histDF
+    parDicts[str(OPTITER)] = parDict 
     if val_accuracy > OPTACCU:
         OPTACCU = 1.0*val_accuracy
         OPTASTD = max(1.0*val_accu_std, 0.0)
-
-        histDF = pd.DataFrame(history.history)
         model.save(modelName)
-        histDFs[str(OPTITER)] = histDF
         histDFs["opt"] = histDF
-        with open(modelName + "/history.pickle", "wb") as handle:
-            pickle.dump(histDFs, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
-        parDict["isOpt"] = True
+        parDict["isOpt"] = True        
         parDicts["opt"] = parDict 
-        with open(modelName + "/pars.pickle", "wb") as handle:
-            pickle.dump(parDicts, handle, protocol=pickle.HIGHEST_PROTOCOL)
         if verbosity >= 1: print("Optimal So Far!")
+    with open(modelName + "/history.pickle", "wb") as handle:
+        pickle.dump(histDFs, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    with open(modelName + "/pars.pickle", "wb") as handle:
+        pickle.dump(parDicts, handle, protocol=pickle.HIGHEST_PROTOCOL)
     if verbosity >= 1:
         print("##########################################################END MODEL FITTING\n\n")
     del model
