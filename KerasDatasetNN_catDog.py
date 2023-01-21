@@ -35,7 +35,7 @@ OPTITER, OPTACCU, OPTASTD = 0, 0, 0
 DATA_LOC     = "./catDogData/full"
 TESTDATA_LOC = "./catDogData/zTest/"
 FIG_LOC      = "./catDogFig/"
-IMAGE_SIZE = (4, 4)#(224, 224)         #(224, 224) for ResNet
+IMAGE_SIZE = (128, 128)         #(224, 224) for ResNet
 RAND_SEED  = 1
 SAVE_GM_MINIMIZE_CHECKPOINT = True
 SAVE_BOOTSTRAP_CHECKPOINT   = True
@@ -58,9 +58,9 @@ def main():
    
     optModelSearchOn  = True
     optimizationCoreN = -1      #-1 to use all CPU cores
-    optimizationCallN = 25      #note: increase to a difference >= 10 when reloading
-    learningEpochN    = 10      #note: equilibrium needed if # of MC dropout layer varies
-    bootstrappingN    = 6
+    optimizationCallN = 30      #note: increase to a difference >= 10 when reloading
+    learningEpochN    = 8      #note: equilibrium needed if # of MC dropout layer varies
+    bootstrappingN    = 5
     
     retrainOptModelOn = True
     learningEpochNOpt = 30
@@ -102,6 +102,8 @@ def main():
         optModelSearchOn = False 
         dims = [learningRate]
         par0 = [1E-3]
+    else:
+        raise AssertionError("main(): no model has been selected")
     if verbosity >= 1: print("\n####################################################RUN STARTS")
 #dataset########################################################################################
     if verbosity >= 1: print("Preparing data:")
@@ -140,8 +142,8 @@ def main():
                         cv2.imwrite(outImgName, resizedImgFile) 
                         '''
                         ###ignore small images
-                        if (origImgFile.shape[0] > IMAGE_SIZE[0]) and\
-                           (origImgFile.shape[1] > IMAGE_SIZE[1]): 
+                        if (origImgFile.shape[0] > inputImageSize[0]) and\
+                           (origImgFile.shape[1] > inputImageSize[1]): 
                             resizedImgFile = zeroPadCenterResize(origImgFile, inputImageSize)
                             cv2.imwrite(outImgName, resizedImgFile) 
                         '''
@@ -518,16 +520,16 @@ def modelConv2D(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     for par, dim in zip(pars, dims): parDict[dim.name] = par
 
     model = tf.keras.models.Sequential()
-    #model.add(tf.keras.layers.RandomFlip("horizontal_and_vertical"))
-    #model.add(tf.keras.layers.RandomRotation(0.2))
+    model.add(flipLayer("horizontal"))
+    #model.add(rotationLayer(0.2))           #makes no sense for directional photos 
     model.add(tf.keras.layers.Rescaling(1.0/127, offset=-1))
     for layer in pretrainedLayers: model.add(cloneLayer(layer))
     if pretrainedLayers == []:
         model.add(tf.keras.layers.Conv2D(convLayerNinit, convFilterNinit, 
                                          activation=parDict["actFunc"],\
-                                         padding="SAME", input_shape=[*inputShape, 1]))
+                                         padding="SAME", input_shape=inputShape))
     for i in range(parDict["convLayerN"]):
-        if pow(2, i+1) < min(inputShape[0], inputShape[1]): 
+        if pow(2, i+1) < min(inputShape[1], inputShape[2]): 
             model.add(tf.keras.layers.MaxPool2D(pool_size=(2, 2)))
         filterN = max(8, parDict["convFilterN"]/pow(2, parDict["convLayerN"]-1-i))
         model.add(tf.keras.layers.Conv2D(filterN, (3, 3), activation=parDict["actFunc"],\
@@ -559,9 +561,8 @@ def modelRNN(pars, dims, targetN, inputShape, pretrainedLayers=[]):
     parDict = {}
     for par, dim in zip(pars, dims): parDict[dim.name] = par
 
-    inputZ = tf.keras.layers.Input([*inputShape, 1])
-    inputZ = tf.keras.layers.RandomFlip("horizontal_and_vertical")(inputZ)
-    inputZ = tf.keras.layers.RandomRotation(0.2)(inputZ)
+    inputZ = tf.keras.layers.Input(inputShape[1:])
+    inputZ = flipLayer("horizontal")(inputZ)
     inputZ = tf.keras.layers.Rescaling(1.0/127, offset=-1)(inputZ)
     Z = inputZ + 0
     for layer in pretrainedLayers: Z = layer(Z)
@@ -634,6 +635,12 @@ def modelResNet50(pars, dims, targetN, inputShape, pretrainedLayers=[]):
 class dropoutMC(tf.keras.layers.Dropout):
     def call(self, inputs):
         return super().call(inputs, training=True) #to be turned off during .evaluation()
+class flipLayer(tf.keras.layers.RandomFlip):
+    def call(self, inputs):
+        return super().call(inputs, training=True) #to be turned off during .evaluation()
+class rotationLayer(tf.keras.layers.RandomRotation):
+    def call(self, inputs):
+        return super().call(inputs, training=True) #to be turned off during .evaluation() 
 #autoencoder####################################################################################
 def buildAutoEncoder(encoder, decoder):
     model = tf.keras.models.Sequential([encoder, decoder])
@@ -750,12 +757,13 @@ def fitFuncGen(modelName, pars, dims, prepDataLoc, imageSize, valiR, batchSize,\
         AUTOTUNE = tf.data.AUTOTUNE
         dataTrain = dataTrain.cache().prefetch(buffer_size=AUTOTUNE)    
         dataVali  = dataVali .cache().prefetch(buffer_size=AUTOTUNE)
-        tf.random.set_seed(bootSeed)    #for dropout Monte Carlo layers
-        model = buildModel(modelName,pars,dims,lenY,imageSize,pretrainedLayers=pretrainedLayers)
         input_shape = None
         for input_shape_in_data, _ in dataTrain:
-            input_shape = input_shape_in_data.shape
+            input_shape = [None, *input_shape_in_data.shape[1:]]
             break
+        tf.random.set_seed(bootSeed)    #for dropout Monte Carlo layers
+        model = buildModel(modelName, pars, dims, lenY, input_shape,\
+                           pretrainedLayers=pretrainedLayers)
         model.build(input_shape)
         if verbosity >= 3: print(model.summary())
         checkpoint_epoch_files = glob.glob(modelName + "/checkpoint_epoch*")
