@@ -58,8 +58,8 @@ def main():
    
     optModelSearchOn  = True
     optimizationCoreN = -1      #-1 to use all CPU cores
-    optimizationCallN = 30      #note: increase to a difference >= 10 when reloading
-    learningEpochN    = 8      #note: equilibrium needed if # of MC dropout layer varies
+    optimizationCallN = 50      #note: increase to a difference >= 10 when reloading
+    learningEpochN    = 8       #note: equilibrium needed if # of MC dropout layer varies
     bootstrappingN    = 5
     
     retrainOptModelOn = True
@@ -772,7 +772,10 @@ def fitFuncGen(modelName, pars, dims, prepDataLoc, imageSize, valiR, batchSize,\
             if len(checkpoint_epoch_files) != 0:
                 if verbosity >= 1: 
                     print("Reading the epoch checkpoint file:\n    ",checkpoint_epoch_files[-1])
-                model.load_weights(checkpoint_epoch_files[-1])
+                try:
+                    model.load_weights(checkpoint_epoch_files[-1])
+                except:
+                    print("     ...reading failed, restarting from epoch 0")
                 for checkpoint_epoch_file in glob.glob(modelName + "/checkpoint_epoch*"): 
                     os.remove(checkpoint_epoch_file)
             elif verbosity >= 1:
